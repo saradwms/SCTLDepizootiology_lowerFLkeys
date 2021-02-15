@@ -1,0 +1,788 @@
+---
+title: "Fine scale SCTLD Lower FRT: Statistical Analyses"
+output: html_notebook
+---
+
+## This notebook includes:
+- Coral cover analysis: aligned ranks transformation 2-way ANOVA (cover_long.csv)
+- Percent coral tissue loss per week per colony analysis (SWG_SCTLDprogrates.csv):
+    - kruskal-wallis and barplot for differences among sites
+    - species differences, kruskal-wallis test
+- Temperature correlations: Pearson cor tests (extended_envdisFig3.csv)
+- Bleaching and SCTLD: Chi-square tests (SCTLD_END_exta_ts.csv)
+- Are certain species more likely to show signs of SCTLD: fishers (SCTLD_END_exta.csv)
+- Size and SCTLD: wilcox test for just 11 susceptible species (SCTLD_END_exta.csv) and then multiple comparisons wiht correction for within species
+- Time of disease onset: bar graphs (SCTLD_END_exta.csv,timedif_surveys.csv)
+- Reef indices of susceptibility
+    - linear regressions for prevalence & density, initial coral cover, shannon diversity,and size
+    - PCoA for species at each quadrat in relation to prevalence
+
+### Set up and load in packages you need
+```{r, message=FALSE, warning=FALSE}
+library(abind)
+library(sciplot)
+library(tidyverse)
+library(ggplot2)
+library(RColorBrewer)
+library(plyr)
+library(dplyr)
+library(ggpubr)
+library(vegan)
+library(nlme)
+library(car)
+library(patchwork)
+library(ARTool)
+library(phia)
+getwd()
+```
+
+Version control: R version 4.0.2 (2020-06-22)
+```{r}
+sessionInfo()$R.version
+```
+
+
+#### Commonly used custom functions for running summary statistics
+
+```{r}
+
+my.se<-function(x){
+  sd(x,na.rm=TRUE)/sqrt(length(x))
+}
+my.se.rows<-function(x){
+  se.tp<-c()
+  for(i in 1:nrow(x)){
+    se.tp[i]<-my.se(x[i,1:2])
+  }
+  return(se.tp)
+}
+my.se.cols<-function(x,a){
+  se.tp<-c()
+  for (i in a:ncol(x)){
+      se.tp[i]<-my.se(x[,i])
+  }
+  return(se.tp[12:32])
+}
+
+```
+
+#### Load in data
+```{r}
+my.data<-read.csv("SCTLD_END_exta.csv") 
+nrow(my.data)
+
+# make a column with factors for if the coral got disease or not throughout the entire survey
+my.data$glom<-as.factor(my.data$total_bin) 
+my.data$glom<-revalue(my.data$glom, c("0"="Healthy", "1"="SCTLD")) 
+head(my.data$glom)
+
+# subset into sites
+## site1 is midchannel, site2 is offshore, and site3 is nearshore
+site1<-subset(my.data,subset=Site==1)
+site2<-subset(my.data,subset=Site==2)
+site3<-subset(my.data,subset=Site==3)
+head(site3)
+
+```
+
+
+## Are there significant differences in coral cover among sites and through time?
+```{r}
+coverlong<-read.csv("cover_long.csv")
+coverlong$Site<-as.factor(coverlong$Site)
+coverlong$plotnum<-as.factor(coverlong$plotnum)
+coverlong$timept<-as.factor(coverlong$timept)
+coverlong<-coverlong%>%
+  filter(plotnum!="p24",plotnum!="p29",plotnum!="p46")%>%
+  droplevels()
+#remove the treated quadrats for paper analysis
+mod<-aov((percent.cover)~Site*timept,data=coverlong)
+plot(mod)
+shapiro.test(mod$residuals)
+#data do not meet assumptions for ANOVA, so an aligned ranks transformation 2-way ANOVA (ARTool package in R, Wobbrock et al. 2011) was used to determine significant differences in percent coral cover among sites and between the initial and final time points. 
+summary(coverlong)
+
+mod<-art(percent.cover~Site*timept,data=coverlong)
+summary(mod)
+(anova(mod))
+testInteractions(artlm(mod,"Site:timept"),pairwise=c("Site","timept"))
+```
+
+
+## Are there significant differences in percent coral tissue loss per week among the three sites?
+```{r}
+my.df<-read.csv("SWG_SCTLDprogrates.csv")
+kruskal.test(Avg_prweek~Site,data=my.df)
+
+my.df$Site<-as.factor(my.df$Site)
+
+### subset by site
+tl.s1<-subset(my.df,subset=Site==1)
+tl.s2<-subset(my.df,subset=Site==2)
+tl.s3<-subset(my.df,subset=Site==3)
+
+s1means<-mean(tl.s1$Avg_prweek)
+s2means<-mean(tl.s2$Avg_prweek)
+s3means<-mean(tl.s3$Avg_prweek)
+
+#standard error
+s1se<-my.se(tl.s1$Avg_prweek)
+s2se<-my.se(tl.s2$Avg_prweek)
+s3se<-my.se(tl.s3$Avg_prweek)
+tl.means<-rbind(s3means,s1means,s2means)
+#tl.means
+tl.se<-rbind(s3se,s1se,s2se)
+tl.se[is.na(tl.se)]<-0
+bp<-barplot(as.matrix((tl.means)),beside=TRUE,ylim=c(0,15),ylab=strwrap("Change in percent tissue loss per week per colony with SCTLD",width=40) ,names.arg=c("Inshore","Midchannel","Offshore"),col=c("grey","light blue","blue"))
+arrows(x0=bp,x1=bp,y0=(tl.means)-1.96*(tl.se),y1=(tl.means)+1.96*(tl.se),code = 3, angle = 90, len = 0.02, xpd = NA)
+legend(x = 1, y=104,legend = c("Inshore","Midchannel","Offshore"), fill =c("grey","light blue","blue"),bty="n")
+
+
+```
+
+No significant differences in percent tissue loss per week per colony among sites. So we don't need to include site as a factor when looking for differences in progression rates among species.
+
+## Differences in progression rates among species?
+```{r}
+aggregate(Avg_prweek~Sps,data=my.df,FUN=mean)
+my.df$Sps<-as.factor(my.df$Sps)
+#my.df_noplci<-subset(my.df,subset=Sps!="PCLI")
+mod<-aov((Avg_prweek)~Sps,data=my.df)
+plot(mod)
+shapiro.test(mod$residuals)
+#try transformations
+mod<-aov(log(Avg_prweek)~Sps,data=my.df)
+plot(mod)
+shapiro.test(mod$residuals)
+#resort to kruskal wallis
+kruskal.test(Avg_prweek~Sps,data=my.df)
+
+```
+
+Significant differences among species.
+
+```{r}
+sps.avg<-aggregate(Avg_prweek~Sps,data=my.df,FUN=mean)
+sps.se<-aggregate(Avg_prweek~Sps,data=my.df,FUN=my.se)
+par(family="Times New Roman")
+bp<-barplot(as.matrix(t(sps.avg$Avg_prweek)),ylim=c(0,25),las=1,ylab="Percent loss per week",names.arg=c(as.character(sps.avg$Sps)),las=2,col="grey")
+arrows(x0=bp,x1=bp,y0=(sps.avg$Avg_prweek)-1.96*(sps.se$Avg_prweek),y1=(sps.avg$Avg_prweek)+1.96*(sps.se$Avg_prweek),code = 3, angle = 90, len = 0.02, xpd = NA)
+numbers<- c("37","6","37","21","11","4","1","28","8","11","12")
+text(x=bp,y=1,numbers )
+#text(x = bp, y =(sps.avg$Avg_prweek)+1.96*(sps.se$Avg_prweek), labels, pos = 3)
+
+```
+
+## Temperature correlations?
+Average progression rates and total incidence among sites were negatively associated with SST and DHW from 04 January 2019 when the disease incidence was first over 5 cases to the end of the surveys on 06 December 2019.
+```{r}
+envdis<-read.csv("extended_envdisFig3.csv")
+colnames(envdis)<-c("dates","sst","bleachalert","dhw","t.anom","tl.means","tl.se","newInc")
+summary(envdis)
+#incidence and dhw
+mod<-lm(log(newInc)~dhw,data=envdis[10:26,])
+shapiro.test(mod$residuals)
+acf(mod$residuals)
+cor.test(envdis$dhw[10:26],log(envdis$newInc[10:26]))
+#incidence and sst
+mod<-lm(log(newInc)~sst,data=envdis[10:26,])
+shapiro.test(mod$residuals)
+acf(mod$residuals)
+cor.test(envdis$sst[10:26],log(envdis$newInc[10:26]))
+#tissue loss and dhw
+mod<-lm((tl.means)~dhw,data=envdis[10:26,])
+shapiro.test(mod$residuals)
+acf(mod$residuals)
+cor.test(envdis$dhw[10:26],log(envdis$tl.means[10:26]))
+#tissue loss and sst
+mod<-lm(log(tl.means)~sst,data=envdis[10:26,])
+shapiro.test(mod$residuals)
+acf(mod$residuals)
+cor.test(envdis$sst[10:26],log(envdis$tl.means[10:26]))
+log(envdis$tl.means)
+
+```
+#### Temperature Correlation figure
+
+
+```{r}
+colnames(envdis)<-c("dates","sst","bleachalert","dhw","t.anom","tl.means","tl.se","newInc")
+tl.newI<-rbind(envdis$tl.means,envdis$newInc)
+tl.newI
+
+tl.newI.se<-rbind(envdis$tl.se,rep(0,times=length(tl.se)))
+envdis$dates<-revalue(envdis$dates, c( "X05.01.18"="05-01-18","X06.01.18"="06-01-18","X06.21.18"="06-21-18","X07.16.18"="07-16-18","X08.17.18"="08-17-18","X10.30.18"="10-30-18", "X11.9.18"="11-09-18", "X11.29.18"="11-29-18","X12.13.18"="12-13-18","X1.4.19"="01-04-19","X1.18.19"="01-18-19","X2.8.19"="02-08-19","X3.4.19"="03-04-19","X3.21.19"="03-21-19","X4.11.19"="04-11-19","X5.2.19"="05-02-19","X5.16.19"="05-16-19","X5.28.19"="05-28-19","X6.13.19"="06-13-19","X7.1.19"="07-01-19","X7.22.19"="07-22-19","X8.16.19"="08-16-19","X9.17.19"="09-17-19","X10.14.19"="10-14-19","X11.12.19"="11-12-19","X12.6.19"="12-06-19"))
+envdis$dates<-as.Date(envdis$dates,"%m-%d-%y")
+envdis$dates<-format(envdis$dates,"%d %b %y")
+
+#tiff("Figure3.tiff",width=180, height=120,units="mm",res=300)
+par(oma = c(0, 1, 1, 3),family="Times New Roman")
+bp<-barplot(as.matrix((tl.newI)),beside=TRUE,ylim=c(0,35),las=1,ylab="Disease metric", names.arg=envdis$dates,las=2,col=c("light grey","dark grey"))
+legend("topleft",cex=.7,bty="n",col=c("light grey","dark grey"),fill=c("light grey","dark grey"),legend=c("Percent coral tissue loss","Incidence"))
+arrows(x0=bp,x1=bp,y0=(tl.newI)-(tl.newI.se),y1=(tl.newI)+(tl.newI.se),code = 3, angle = 90, len = 0.02, xpd = NA)
+par(new = T, family="Times New Roman")
+plot(bp[1,],envdis$dhw,xlab=NA,ylab=NA,axes=F,ylim=c(0,10),type="b",col="blue",pch=19,lwd=2)
+axis(side = 4,col="blue",line=3, lwd=2)
+#mtext(side = 4, line = 3, 'Degree Heating Week')
+par(new = T)
+plot(bp[1,],envdis$sst,xlab=NA,ylab=NA,axes=F,ylim=c(20,34),type="b",col="red")
+axis(side = 4,col="red")
+mtext(side = 3, 'SST      DHW',at=86,line=1)
+#dev.off()
+```
+
+## Did susceptible corals who bleached then get sctld?
+```{r}
+###looking at thermal stress
+my.data.ts<-read.csv("SCTLD_END_exta_ts.csv") ## this file is the same as the original, but includes columns related to thermal stress signs
+dis.sps.ts<-my.data.ts%>%
+  filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
+  droplevels()
+dis.ts.table<-table(dis.sps.ts$tot_diseased,dis.sps.ts$tot_stressed)
+chisq.test(dis.ts.table)$expected
+dis.ts.table
+chisq.test(dis.ts.table)
+```
+
+
+## Are certain species more likely to show signs of SCTLD than species? Yes.
+```{r}
+my.table<-table(my.data$Sps,my.data$glom)
+my.table
+chisq.test(my.table)$expected #does not meet assumptions for chi square
+fisher.test(my.table,simulate.p.value=T)
+#chisq.test(table(dis.sps$Sps,dis.sps$glom))$expected
+```
+Same, but for just the 11 susceptible species?
+```{r}
+dis.sps<-my.data%>%
+  filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
+  droplevels()
+my.table<-table(dis.sps$Sps,dis.sps$glom)
+chisq.test(my.table)$expected #does not meet assumptions for chi square
+fisher.test(my.table,simulate.p.value=T)
+
+```
+
+## Are larger corals more likely to to show signs of SCTLD?
+```{r}
+## let's look at all under 200cm, becuase there's just one or two outliers
+mwidth.200cm<-subset(dis.sps,subset=Max_width<=200)
+nrow(mwidth.200cm)/nrow(dis.sps) #99.7% under 200cm
+```
+
+```{r}
+mw.means<-aggregate(Max_width~glom,data=mwidth.200cm,FUN=mean)
+#mw.means
+mw.se<-aggregate(Max_width~glom,data=mwidth.200cm,FUN=function(x) sd(x)/sqrt(length(x)))
+#mw.se
+ci.upp <- mw.means$Max_width + 1.96 * mw.se$Max_width
+#ci.upp
+ci.low <- mw.means$Max_width - 1.96 * mw.se$Max_width
+disnames<-c("Healthy","SCTLD")
+bp <- barplot(mw.means$Max_width, beside = TRUE, names = disnames,col=c("lightgrey","darkgrey"),ylim=c(0,100),ylab="Maximum Colony Width (cm)",horiz=FALSE)
+arrows(y0 = ci.low, y1 = ci.upp, x0 = bp, x1 = bp, angle = 90, code = 3, length = 0.1)
+```
+```{r}
+aggregate(Max_width~glom,data=mwidth.200cm,FUN=mean)
+
+dis.w<-subset(mwidth.200cm,subset=glom=="SCTLD",select="Max_width")
+health.w<-subset(mwidth.200cm,subset=glom=="Healthy",select="Max_width")
+shapiro.test((dis.w$Max_width))
+shapiro.test((health.w$Max_width))
+
+wilcox.test((dis.w$Max_width),(health.w$Max_width)) #significant! p-value = 8.132e-12
+
+
+```
+We use the Wilcoxon rank sum test (Mann-Whitney) becuase the data do not meet assumptions. Compares the medians of two groups using ranks. 
+
+```{r}
+mw.means<-aggregate(Max_width~Site,data=mwidth.200cm,FUN=mean)
+#mw.means
+mw.se<-aggregate(Max_width~Site,data=mwidth.200cm,FUN=function(x) sd(x)/sqrt(length(x)))
+#mw.se
+ci.upp <- mw.means$Max_width + 1.96 * mw.se$Max_width
+#ci.upp
+ci.low <- mw.means$Max_width - 1.96 * mw.se$Max_width
+disnames<-c("Healthy","SCTLD")
+bp <- barplot(mw.means$Max_width, beside = TRUE, names = levels(mwidth.200cm$Site),ylim=c(0,100),ylab="Maximum Colony Width (cm)",horiz=FALSE)
+arrows(y0 = ci.low, y1 = ci.upp, x0 = bp, x1 = bp, angle = 90, code = 3, length = 0.1)
+```
+
+## Now for difs within species, multiple comparisons and BH correction
+```{r}
+#table(mwidth.200cm$Sps,mwidth.200cm$glom)
+#levels(as.factor(mwidth.200cm$Sps))
+#mwidth.200cm$Sps<-as.factor(mwidth.200cm$Sps)
+resmat<-matrix(NA,nrow=0,ncol=3)
+dis.sps_np<-subset(dis.sps,subset=Sps!="PCLI") #take out pcli because only one colony
+dis.sps_np$Sps<-as.factor(dis.sps_np$Sps)
+
+#levels(dis.sps_np$Sps)
+for (i in 1:length(levels(dis.sps_np$Sps))){
+  #print(levels(dis.sps_np$Sps)[i])
+  just.one<-subset(dis.sps_np,subset=Sps==levels(dis.sps_np$Sps)[i])
+  dis.w<-subset(just.one,subset=glom=="SCTLD",select="Max_width")
+  health.w<-subset(just.one,subset=glom=="Healthy",select="Max_width")
+  stat<-wilcox.test(dis.w$Max_width,health.w$Max_width)
+  results<-c(levels(dis.sps_np$Sps)[i], stat$statistic,stat$p.value)
+  resmat<-rbind(resmat,results)
+}
+nomaxorpcli_all_results<-cbind(resmat,p.adjust(as.numeric(resmat[,3]),"hochberg"),p.adjust(as.numeric(resmat[,3]),"holm"),p.adjust(as.numeric(resmat[,3]),"bonferroni"))
+results<-as.data.frame(nomaxorpcli_all_results)
+colnames(results)<-c("sps","wstat", "p.val","benajmini_hochberg","holm", "bonferoni")
+results
+```
+So there are significant differences for CNAT, DSTO, SSID 
+
+```{r}
+## Get Barplot
+mw.means.sp<-aggregate(Max_width~Sps+glom,data=dis.sps,FUN=mean)
+#mw.means.sp
+mw.se.sp<-aggregate(Max_width~Sps+glom,data=dis.sps,FUN=function(x) sd(x)/sqrt(length(x)))
+
+size.sp<-cbind(mw.means.sp,mw.se.sp$Max_width)
+colnames(size.sp)<-c("sps","state","mean","se")
+ggplot(size.sp,aes(x=sps,y=mean,fill=state))+
+  geom_bar(stat="identity",position=position_dodge(.9))+theme(panel.background = element_blank())+
+  geom_errorbar(aes(ymax=mean + se, ymin=mean-se),width=0.2,position=position_dodge(.9))+
+  theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+scale_fill_manual(values=c("Healthy" = "grey52","SCTLD"="grey28"), drop = FALSE)+
+  theme(legend.position="none")+scale_x_discrete(limits=c("SSID","SINT","MCAV","DSTO","CNAT","PSTR","SBOU","OANN","OFAV","DLAB","PCLI"))+
+  labs(x="",y="Maximum width (cm)")+
+  theme(legend.position = c(0.9, 0.7) ,legend.text=element_text(size=12),legend.title=element_blank(),legend.key.size =unit(0.5,"line"))+scale_y_continuous(breaks=seq(0,80,10),expand = c(0, 0),lim=c(0,80))
+#progrates
+#sps.avg
+#size.sp
+```
+
+## Time of disease onset
+
+
+## Now look at timing of disease
+```{r}
+my.data.dis<-my.data%>%
+  filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
+  droplevels()
+head(my.data.dis)
+timedifs<-read.csv("timedif_surveys.csv") #survey dates, number of days since last date, and running sum of days; calculated and formatted in excel
+my.data.disonly<-my.data.dis%>%
+  filter(total_bin>0)
+timedifs
+```
+
+need the new_inf_corals function 
+```{r}
+new_inf_corals<-function(df,steps,x){
+  ## newly_I
+  newly_I<-matrix(0, nrow = nrow(df), ncol = steps) #blank matrix for storing newly infected corals
+  #newly_I
+  for (i in 1:steps){ #for each survey time point
+    col<-x+i #start with first tp after init tp
+    prev<-x+i-1
+    for (j in 1:(nrow(df))){ #for each row in the df
+      #print (df[j,col])
+      if ( df[j,col]=="SCTLD" ){ #if it's disease
+        #print( "found one")
+        if (df[j,prev]!="SCTLD"){ # and if it wasnt diseased before
+          newly_I[j,i]<-1 #add it to newly infected
+        }
+      }
+    }
+  }
+  return(newly_I)
+}
+```
+
+```{r}
+head(my.data.disonly)
+```
+
+
+```{r}
+colnames(my.data.disonly)
+wheninfected<-new_inf_corals(my.data.disonly,21,12) #df, steps, x
+wheninfected
+dateinf<-c()
+for (i in 1:nrow(my.data.disonly)){ #for ech colony
+  for (j in 1:ncol(wheninfected)){ #for each date in wheninfected
+    if(wheninfected[i,j]==1){ #if a colony is infected
+      dateinf[i]<-j #the date infected is J
+    }
+    if(my.data.disonly$total[i]==0){
+      dateinf[i]<-"Healthy"
+    }
+  }
+  
+}
+nrow(wheninfected)
+nrow(my.data.disonly)
+length(dateinf)
+median(dateinf)
+my.data.disonly$dateinf<-dateinf #starting in october
+my.data.disonly$dateinf<-as.numeric(my.data.disonly$dateinf)
+
+table(my.data.disonly$Site,my.data.disonly$dateinf)
+site1_initdis<-3
+site2_initdis<-1
+site3_initdis<-7
+
+dateinfbysite<-data.frame()
+dateinfbysite
+
+for (i in 1:nrow(my.data.disonly)){ #for each colony
+  if(my.data.disonly$Site[i]==1){ #if in site 1
+    dateinfbysite[i,1]<-site1_initdis #make a new column that tracks date that infection started at each site
+  }
+  if(my.data.disonly$Site[i]==2){
+    dateinfbysite[i,1]<-site2_initdis
+  }
+  if(my.data.disonly$Site[i]==3){
+    dateinfbysite[i,1]<-site3_initdis
+  }
+}
+dateinfbysite
+my.data.disonly$datesiteinf<-dateinfbysite[,1] #add to major dataset
+my.data.disonly$dateinfbysite<-as.numeric(my.data.disonly$dateinf)-my.data.disonly$datesiteinf #subtract the infection start date from the date each colony was infected
+timedifs # came from somewhere else... saved csv
+dateinf_days<-c()
+datesiteinf_days<-c()
+for (i in 1:nrow(my.data.disonly)){ #for each colony
+  dateinf_days[i]<-sum(timedifs$days_since_last[1:my.data.disonly$dateinf[i]])
+  datesiteinf_days[i]<-sum(timedifs$days_since_last[1:my.data.disonly$datesiteinf[i]])
+}
+
+#timedifs
+#dateinf_days
+#my.data.disonly$dateinf
+#datesiteinf_days
+my.data.disonly$dateinfbysite_days<-dateinf_days-datesiteinf_days
+
+boxplot(my.data.disonly$dateinfbysite_days~my.data.disonly$Sps,na.rm=TRUE,ylab="Survey Number after")
+
+my.data.disonly$dateinfbysite_weeks<-my.data.disonly$dateinfbysite_days/7
+boxplot(my.data.disonly$dateinfbysite_weeks~my.data.disonly$Sps,na.rm=TRUE,ylab="Survey Number after")
+
+
+infdate.sps.avg<-aggregate(dateinfbysite_weeks~Sps,data=my.data.disonly,FUN=mean)
+infdate.sps.se<-aggregate(dateinfbysite_weeks~Sps,data=my.data.disonly,FUN=my.se)
+infdate.sps.se[is.na(infdate.sps.se)]<-0
+par(family="Times New Roman")
+bp<-barplot(as.matrix(t(infdate.sps.avg$dateinfbysite_weeks)),ylim=c(0,60),las=1,ylab="When infected (Weeks after first infection at site)",names.arg=c(as.character(infdate.sps.avg$Sps)),las=2,col="grey")
+arrows(x0=bp,x1=bp,y0=(infdate.sps.avg$dateinfbysite_weeks)-1.96*(infdate.sps.se$dateinfbysite_weeks),y1=(infdate.sps.avg$dateinfbysite_weeks)+1.96*(infdate.sps.se$dateinfbysite_weeks),code = 3, angle = 90, len = 0.02, xpd = NA)
+
+infdate.sps.se[is.na(infdate.sps.se)]<-0
+
+inftime<-ggplot(infdate.sps.avg,aes(Sps,y=dateinfbysite_weeks))+
+  geom_bar(stat="identity",fill="grey45")+theme(panel.background = element_blank())+
+  geom_errorbar(aes(ymax=infdate.sps.avg$dateinfbysite_weeks +infdate.sps.se$dateinfbysite_weeks, ymin=infdate.sps.avg$dateinfbysite_weeks-infdate.sps.se$dateinfbysite_weeks),width=0.2)+
+  theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  theme(legend.position="none")+scale_x_discrete(limits=c("SSID","SINT","MCAV","DSTO","CNAT","PSTR","SBOU","OANN","OFAV","DLAB","PCLI"))+
+  labs(x="",y="")+
+  ylab(expression(paste("Time of disease onset (weeks \n after first diseased signs  observed)")))+
+  theme(legend.position = c(0.9, 0.7) ,legend.text=element_text(size=10),legend.title=element_blank(),legend.key.size =unit(0.5,"line"))+scale_y_continuous(breaks=seq(0,50,5),expand = c(0, 0),lim=c(0,50))
+inftime
+median(infdate.sps.avg$dateinfbysite_weeks)
+
+```
+
+
+## Reef level indicators of susceptibility
+
+### Species Diversity Analyses
+Goal: Visualize relationships between total disease prevalence per plot and it's relationships with coral diversity and density metrics
+- Shannon Diversity
+- Species Richness
+- Species Density
+- Colony Density
+
+#### Diversity Metrics
+```{r}
+str(my.data)
+my.data$Plot<-as.factor(my.data$Plot)
+### need a df where each row is a plot and columns are species
+sps.list<-(table(my.data$Plot,my.data$Sps))
+sps.list
+sps.df<-rbind(sps.list[1,],sps.list[2,],sps.list[3,],sps.list[4,],sps.list[5,],sps.list[6,])
+row.names(sps.df)<-c("p23","p25","p27","p28","p45","p47")
+
+### calculate metrics
+sh.div<-diversity(sps.df,index="shannon")
+sp.rich<-specnumber(sps.df)
+mean(sp.rich)
+my.se(sp.rich)
+evenness.J<-sh.div/specnumber(sps.df)
+sps.density<-sp.rich/100 #divide by area of plot 100m^2
+col.density<-rowSums(sps.list)/100
+ncorals<-rowSums(sps.list)
+sp.info<-cbind(sh.div,sp.rich,sps.density,evenness.J,col.density,ncorals)
+sp.info
+plotprev<-aggregate(total_bin~Plot,data=my.data,FUN=function(x) sum(x)/length(x))
+plotprev
+avgplotsiteprev<-(plotprev[seq(from = 1, to = NROW(plotprev), by = 2),2]+plotprev[seq(from = 2,to = NROW(plotprev), by = 2),2])/2
+
+#make dataframe for plot-level data
+colnames(plotprev)<-c("Plot","totprev")
+plot.df<-cbind(plotprev,sp.info)
+sitenum<-c(1,1,2,2,3,3)
+plot.df<-cbind(plot.df,sitenum)
+plot.df
+#add maxwidth
+plot.df$avg.max_width<-aggregate(Max_width~Plot,FUN=mean,data=my.data)
+#add cover
+str(coverlong) #from percent cover analysis above
+cover.means<-aggregate(percent.cover~plotnum+timept,data=coverlong,FUN=mean)
+cover<-cover.means[1:6,3]
+plot.df$initcover<-cover
+plot.df$avg.max_width
+```
+
+
+```{r}
+plot.data<-plot.df
+plot.data$avgmaxwidth<-plot.data$avg.max_width$Max_width
+
+div.mod<-lm(totprev~sh.div,data=plot.data)
+div.plot<-ggplot(div.mod$model, aes_string(x = names(div.mod$model)[2], y = names(div.mod$model)[1])) + 
+  geom_point(aes(color=c("Midchannel","Midchannel","Offshore","Offshore","Inshore","Inshore"))) +
+  stat_smooth(method = "lm", col = "red",se=TRUE,size=.5,alpha=0.1)+
+  theme(panel.background = element_blank())+ theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+theme(legend.position="None")+
+  labs(x="Shannon diversity",y="Total prevalence")+scale_color_manual(values=c("grey","light blue","blue"))+scale_y_continuous(breaks=seq(0,.2,.05),expand = c(0, 0),limits=c(-0.01,.25))
+div.plot
+
+dens.mod<-lm(totprev~col.density,data=plot.data)
+dens.plot<-ggplot(dens.mod$model, aes_string(x = names(dens.mod$model)[2], y = names(dens.mod$model)[1])) + 
+  geom_point(aes(color=c("Midchannel","Midchannel","Offshore","Offshore","Inshore","Inshore"))) +
+  stat_smooth(method = "lm", col = "red",se=TRUE,size=.5,alpha=0.1,linetype=2)+
+  theme(panel.background = element_blank())+ theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+theme(legend.position="None")+
+  labs(x="Colony density",y="Total prevalence",color="Site")+scale_color_manual(values=c("grey","light blue","blue"))+scale_y_continuous(breaks=seq(-.1,.3,.05),limits=c(-0.1,.3))
+dens.plot
+div.plot
+
+cov.mod<-lm(totprev~initcover,data=plot.data)
+cov.plot<-ggplot(cov.mod$model, aes_string(x = names(cov.mod$model)[2], y = names(cov.mod$model)[1])) + 
+  geom_point(aes(color=c("Midchannel","Midchannel","Offshore","Offshore","Inshore","Inshore"))) +
+  stat_smooth(method = "lm", col = "red",se=TRUE,size=.5,alpha=0.1)+
+  theme(panel.background = element_blank())+ theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+theme(legend.position="None")+
+  labs(x="Initial percent coral cover",y="Total prevalence",color="Site")+scale_color_manual(values=c("grey","light blue","blue"))+scale_y_continuous(breaks=seq(0,.3,.05),expand = c(0, 0),limits=c(-0.01,.3))
+cov.plot
+summary(cov.mod)
+
+size.mod<-lm(totprev~avgmaxwidth,data=plot.data)
+size.plot<-ggplot(size.mod$model, aes_string(x = names(size.mod$model)[2], y = names(size.mod$model)[1])) + 
+  geom_point(aes(color=c("Midchannel","Midchannel","Offshore","Offshore","Inshore","Inshore"))) +
+  stat_smooth(method = "lm", col = "red",se=TRUE,size=.5,alpha=0.1)+
+  theme(panel.background = element_blank())+ theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+theme(legend.position="None")+
+  labs(x="Average colony maximum width",y="Total prevalence",color="Site")+scale_color_manual(values=c("grey","light blue","blue"))+scale_y_continuous(breaks=seq(0,.2,.05),expand = c(0, 0),limits=c(0,.25))
+size.plot
+
+```
+
+```{r}
+dens.plot+cov.plot+div.plot+size.plot
+```
+
+#### What species indicate a reef may be susceptible?: PCOA
+
+```{r}
+library(viridis)
+library(factoextra)
+library(FactoMineR)
+library(corrplot)
+```
+
+
+```{r}
+#get the number of each susceptible species per quadrat
+num_dsto<-table(my.data$Plot,my.data$Sps=="DSTO")
+num_mcav<-table(my.data$Plot,my.data$Sps=="MCAV")
+num_pstri<-table(my.data$Plot,my.data$Sps=="PSTR")
+num_cnats<-table(my.data$Plot,my.data$Sps=="CNAT")
+num_dlab<-table(my.data$Plot,my.data$Sps=="DLAB")
+num_ofav<-table(my.data$Plot,my.data$Sps=="OFAV")
+num_oann<-table(my.data$Plot,my.data$Sps=="OANN")
+num_sbou<-table(my.data$Plot,my.data$Sps=="SBOU")
+num_sint<-table(my.data$Plot,my.data$Sps=="SINT")
+num_ssid<-table(my.data$Plot,my.data$Sps=="SSID")
+
+
+Pstr<-num_pstri[,2]
+Cnat<-num_cnats[,2]
+Dsto<-num_dsto[,2]
+Mcav<-num_mcav[,2]
+Dlab<-num_dlab[,2]
+Ofav<-num_ofav[,2]
+Oann<-num_oann[,2]
+Sbou<-num_sbou[,2]
+Sint<-num_sint[,2]
+Ssid<-num_ssid[,2]
+df<-cbind(Pstr,Cnat,Dsto,Mcav,Dlab,Ofav,Oann,Sbou,Sint,Ssid)
+df
+norm.df<-df/rowSums(df) #normalized (by total number s sps) abundances of susceptible species at the 6 plots. 
+
+norm.df
+```
+
+```{r}
+s.sps.pca<-PCA(norm.df) #performs principle component analysis on normalized species counts dataframe
+get_eigenvalue(s.sps.pca) #eigenvalues measures the amount of variation in each principle component
+#scree plot
+fviz_eig(s.sps.pca) #visualizes hte amount of variation explained by each pc
+#extract results for variables
+var<-get_pca_var(s.sps.pca)
+var$contrib #contrib is the contribution in percentage of the variables to the principle components
+```
+
+
+```{r}
+corrplot(var$contrib,is.corr=FALSE)
+fviz_cos2(s.sps.pca,choice="var",axes=1:2)
+
+```
+So Dlab less important for explaining most of the variation among quadrats
+
+```{r}
+fviz_contrib(s.sps.pca,choice="var",axes=1)
+fviz_contrib(s.sps.pca,choice="var",axes=2)
+```
+
+```{r}
+fviz_pca_var(s.sps.pca,alpha.var="contrib",gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+```
+
+```{r}
+dimdesc(s.sps.pca,axes=c(1,2),proba=0.05)
+#This function is designed to point out the variables and the categories that are the most characteristic according to each dimension obtained by a Factor Analysis. 
+
+```
+
+```{r}
+var<-get_pca_var(s.sps.pca)
+var$contrib
+km <- kmeans(var$coord, centers = 2, nstart = 25)
+grp <- as.factor(km$cluster)
+
+nice.biplot<-fviz_pca_biplot(s.sps.pca, 
+       
+                # Fill individuals by groups
+                #geom.ind = "point",
+                pointshape = 21,
+                pointsize = 2.5,
+                mean.point=FALSE,
+                fill.ind = as.factor(c("Midchannel","Midchannel","Offshore","Offshore","Nearshore","Nearshore")),
+                col.ind = "black",
+                # Color variable by groups
+                col.var = grp,
+                alpha.var ="contrib",
+                
+                legend.title = list(fill = "Site", alpha="Contribution",color="Cluster"),
+                repel=TRUE,
+                geom.ind=c("point","text"),
+                axes.linetype="dashed") +
+  ggpubr::fill_palette(c("blue","grey","light blue"))+
+  ggpubr::color_palette(c("dark grey","black"))
+nice.biplot
+```
+
+
+```{r}
+right.biplot<-ggpubr::ggpar(nice.biplot,
+              title="",
+              ggtheme=theme_classic(),legend="right",ylab="PC 2",xlab="PC 1")
+good.biplot<-right.biplot+
+  theme(panel.background = element_blank())+ theme(text = element_text(family = "Times New Roman"))
+```
+
+```{r}
+#tiff("Figure5.tiff",width=180, height=210,units="mm",res=300)
+patch<-(dens.plot/div.plot) | (cov.plot/size.plot)
+(patch | good.biplot) + plot_annotation(tag_levels="a")+ plot_layout(widths=c(1.5,1.5,3))+theme(text = element_text(family = "Times New Roman",size=12))
+#dev.off()
+```
+
+```{r}
+#tiff("Figure5.tiff",width=180, height=300,units="mm",res=300)
+#patch<-(dens.plot/div.plot) | (cov.plot/size.plot)
+(patch / good.biplot) + plot_annotation(tag_levels="A")+ plot_layout(widths=c(1.5,1.5,3))+theme(text = element_text(family = "Times New Roman",size=12))
+#dev.off()
+```
+
+
+### Making Figure 4
+
+Prevalence, Panel A
+```{r}
+prevplot<-ggplot(dis.sps,aes(x=Sps,fill=glom))+geom_bar(stat="count")+theme(panel.background = element_blank())+ theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(x="",y="")+
+  theme(legend.position="none")+scale_x_discrete(limits=c("SSID","SINT","MCAV","DSTO","CNAT","PSTR","SBOU","OANN","OFAV","DLAB","PCLI"))+labs(x="",y="Number of Colonies")+scale_fill_manual(values=c("Healthy" = "grey85","SCTLD"="grey45"), drop = FALSE)+theme(legend.position = c(0.9, 0.7) ,legend.text=element_text(size=12),legend.title=element_blank(),legend.key.size =unit(0.5,"line"))+scale_y_continuous(breaks=seq(0,650,50),expand = c(0, 0),lim=c(0,650))+theme(axis.text.x = element_text(angle = 45,hjust=1))
+prevplot
+```
+
+Percent tissue loss per week, panel B
+```{r}
+#sps.avg
+#sps.se
+prog.fig<-cbind(sps.avg,sps.se)
+colnames(prog.fig)<-c("sps","mean","sps2","se")
+
+progrates<-ggplot(prog.fig,aes(sps,y=mean))+
+  geom_bar(stat="identity",fill="grey45")+theme(panel.background = element_blank())+
+  geom_errorbar(aes(ymax=mean + se, ymin=mean-se),width=0.2)+
+  theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  theme(legend.position="none")+scale_x_discrete(limits=c("SSID","SINT","MCAV","DSTO","CNAT","PSTR","SBOU","OANN","OFAV","DLAB","PCLI"))+
+  labs(x="",y="Percent tissue loss per week")+
+  theme(legend.position = c(0.9, 0.7) ,legend.text=element_text(size=10),legend.title=element_blank(),legend.key.size =unit(0.5,"line"))+scale_y_continuous(breaks=seq(0,20,2),expand = c(0, 0),lim=c(0,20))+theme(axis.text.x = element_text(angle = 45,hjust=1))
+progrates
+
+```
+
+Infection timing, panel C
+```{r}
+#From above
+infdate.sps.avg
+infdate.sps.se
+inftime<-ggplot(infdate.sps.avg,aes(Sps,y=dateinfbysite_weeks))+
+  geom_bar(stat="identity",fill="grey45")+theme(panel.background = element_blank())+
+  geom_errorbar(aes(ymax=infdate.sps.avg$dateinfbysite_weeks +infdate.sps.se$dateinfbysite_weeks, ymin=infdate.sps.avg$dateinfbysite_weeks-infdate.sps.se$dateinfbysite_weeks),width=0.2)+
+  theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  theme(legend.position="none")+scale_x_discrete(limits=c("SSID","SINT","MCAV","DSTO","CNAT","PSTR","SBOU","OANN","OFAV","DLAB","PCLI"))+
+  labs(x="",y="")+
+  ylab(expression(paste("Time of disease onset (weeks \n after first diseased signs  observed)")))+
+  theme(legend.position = c(0.9, 0.7) ,legend.text=element_text(size=10),legend.title=element_blank(),legend.key.size =unit(0.5,"line"))+scale_y_continuous(breaks=seq(0,50,5),expand = c(0, 0),lim=c(0,50))+theme(axis.text.x = element_text(angle = 45,hjust=1))
+inftime
+median(infdate.sps.avg$dateinfbysite_weeks)
+infdate.sps.avg
+infdate.sps.se
+```
+
+Size and disease panel D
+```{r}
+#size.sp<-read.csv("size_sp.csv")
+size.sp.plot<-ggplot(size.sp,aes(x=sps,y=mean,fill=state))+
+  geom_bar(stat="identity",position=position_dodge(.9))+theme(panel.background = element_blank())+
+  geom_errorbar(aes(ymax=mean + se, ymin=mean-se),width=0.2,position=position_dodge(.9))+
+  theme(text = element_text(family = "Times New Roman"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+scale_fill_manual(values=c("Healthy" = "grey85","SCTLD"="grey45"), drop = FALSE)+
+  theme(legend.position="none")+scale_x_discrete(limits=c("SSID","SINT","MCAV","DSTO","CNAT","PSTR","SBOU","OANN","OFAV","DLAB","PCLI"))+
+  labs(x="",y="Maximum width (cm)")+
+  theme(legend.position = "none" ,legend.text=element_text(size=10),legend.title=element_blank(),legend.key.size =unit(0.5,"line"))+scale_y_continuous(breaks=seq(0,80,10),expand = c(0, 0),lim=c(0,80))+
+  geom_signif(comparisons=list(c("CNAT","CNAT"), c("SSID","SSID"),c("DSTO","DSTO")), annotations="***",
+              y_position = c(64,49,16), tip_length = 0, vjust=0.4)+theme(axis.text.x = element_text(angle = 45,hjust=1))
+
+size.sp.plot
+```
+
+```{r,fig.height=4.5,fig.width=2.5}
+tiff("Figure4.tiff",width=85, height=260,units="mm",res=300)
+(prevplot/progrates/inftime/size.sp.plot)+ plot_annotation(tag_levels="A")
+dev.off()
+```

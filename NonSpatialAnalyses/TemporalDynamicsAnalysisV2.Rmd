@@ -1,0 +1,626 @@
+---
+title: "Temporal Dynamics SCTLD Lower Keys"
+output: html_notebook
+---
+## This notebook includes:
+- Data-wrangling for temporal dynamics visualization, use SCTLD_END_exta.csv
+- Produces Figure 2
+
+### Load packages needed and do initial data wrangling
+```{r, message=FALSE, warning=FALSE}
+library(abind)
+library(sciplot)
+library(tidyverse)
+library(ggplot2)
+library(RColorBrewer)
+library(plyr)
+library(dplyr)
+library(ggpubr)
+library(patchwork)
+getwd()
+```
+
+```{r}
+my.data<-read.csv("SCTLD_END_exta.csv", header=T) #shortened file with just one column per date with levels of 
+my.data<-my.data[,-c(34:37)]
+str(my.data)
+#my.data$Plot
+```
+
+Get the data into long format and get the timepoints into the right format for plotting via ggplot.
+```{r}
+#move to a long format so that every row is now an observation of a colony at a single timepoint
+data_long <- gather(my.data, key=timept, value=state, X5.1.18:X12.6.19,factor_key = TRUE)
+head(data_long)
+summary(as.factor(data_long$state))
+#make the health states factors
+data_long$state<-factor(data_long$state,levels=c("Healthy","SCTLD","Dead","Unknown"))
+
+data_long$timept<-revalue(data_long$timept, c( "X5.1.18"="05-10-18","X6.1.18"="06-01-18","X6.21.18"="06-21-18","X7.16.18"="07-16-18","X8.17.18"="08-17-18","X10.30.18"="10-30-18", "X11.9.18"="11-09-18", "X11.29.18"="11-29-18","X12.13.18"="12-13-18","X1.4.19"="01-04-19","X1.18.19"="01-18-19","X2.8.19"="02-08-19","X3.4.19"="03-04-19","X3.21.19"="03-21-19","X4.11.19"="04-11-19","X5.2.19"="05-02-19","X5.16.19"="05-16-19","X5.28.19"="05-28-19","X6.13.19"="06-13-19","X7.1.19"="07-01-19","X7.22.19"="07-22-19","X8.16.19"="08-16-19","X9.17.19"="09-17-19","X10.14.19"="10-14-19","X11.12.19"="11-12-19","X12.6.19"="12-06-19"))
+summary(data_long)
+
+```
+### Group by species, site, plot, timept, and state
+```{r}
+#group by species, site, plot, timept and state
+tryfreq<-data_long%>%
+  dplyr::group_by(Sps,Site,Plot,timept,state)%>%
+  dplyr::summarise(num=n())%>%
+  dplyr::group_by(Sps,Site,Plot,timept)%>%
+  dplyr::mutate(Fraction=num/sum(num))
+
+#tryfreq
+
+
+#expands the data so that all health state factors are listed for each timepoint for each species and joins it with old tp_counts... it also takes a long time.
+tp_counts2<-tryfreq%>%
+  expand(state)%>% 
+  left_join(tryfreq)
+#previous step expands it by listing as NA, and now we make it so that NAs are 0s
+tp_counts2[is.na(tp_counts2)] <- 0
+#tp_counts2
+
+fracs<-as.data.frame(tp_counts2)
+colnames(fracs)[colnames(fracs)=="num"] <- "num_cols"
+colnames(fracs)[colnames(fracs)=="Fraction"] <- "fraction"
+summary(fracs)
+head(fracs)
+
+```
+We just really care about the species that showed disease signs
+```{r}
+#filter out the not susceptible species
+fracs_dis_sps<-fracs%>%
+  filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
+  droplevels()
+fracs_dis_sps$Sps<-as.factor(fracs_dis_sps$Sps)
+str(fracs_dis_sps)
+```
+
+### Plot each site separately as a multipanel grid of plot number (cols) and species (rows)
+```{r,fig.height=8,fig.width=6}
+fracs_dis_sps$dates<-as.character(fracs_dis_sps$timept)
+fracs_dis_sps$dates<-as.Date(fracs_dis_sps$dates,"%m-%d-%y")
+
+site1<-fracs_dis_sps%>%
+  filter(Site==1,state!="Unknown")%>%
+  droplevels()
+site1$state<-factor(site1$state,levels=c("Healthy","SCTLD","Dead"))#,"Unknown","TreatedUnknown","Treated"))
+species_time<-ggplot(data=site1,mapping=aes(x=dates,y=fraction,color=state))
+species_time+
+  geom_line(aes(color=state))+facet_grid(Sps~Plot)+
+  geom_point(aes(color=state))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous("Fraction of Colonies",breaks=c(0,0.2,0.4,0.6,0.8,1))+
+  scale_x_date("Survey Dates 2018-2019",date_breaks = "2 months",date_labels = "%m %d %y")+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","TreatedUnknown"="lightgoldenrod","Treated"="darkorange4","Unknown"="grey"),labels=c("Healthy","SCTLD","Dead","Unknown"),drop=FALSE)+
+  ggtitle("Mid-Channel")+
+  theme(axis.text.x = element_text(angle=70, hjust=1))
+
+```
+
+```{r,fig.height=8,fig.width=6}
+
+site2<-fracs_dis_sps%>%
+  filter(Site==2,state!="Unknown")%>%
+  droplevels()
+site2$state<-factor(site2$state,levels=c("Healthy","SCTLD","Dead"))
+ggplot(data=site2,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_line(aes(color=state))+facet_grid(Sps~Plot)+
+  geom_point(aes(color=state))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous("Fraction of Colonies",breaks=c(0,0.2,0.4,0.6,0.8,1))+
+  scale_x_date("Survey Dates 2018-2019",date_breaks = "2 months",date_labels = "%m %d %y")+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","TreatedUnknown"="lightgoldenrod","Treated"="darkorange4","Unknown"="grey","TreatedSCTLD"="orange"),labels=c("Healthy","SCTLD","Dead","Unknown"),drop=FALSE)+
+  ggtitle("Off-Shore")+
+  theme(axis.text.x = element_text(angle=70, hjust=1))
+
+```
+
+```{r,fig.height=8,fig.width=6}
+
+site3<-fracs_dis_sps%>%
+  filter(Site==3,state!="Unknown")%>%
+  droplevels()
+site3$state<-factor(site3$state,levels=c("Healthy","SCTLD","Dead"))
+ggplot(data=site1,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_line(aes(color=state))+facet_grid(Sps~Plot)+
+  geom_point(aes(color=state))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous("Fraction of Colonies",breaks=c(0,0.2,0.4,0.6,0.8,1))+
+  scale_x_date("Survey Dates 2018-2019",date_breaks = "2 months",date_labels = "%m %d %y")+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","TreatedUnknown"="lightgoldenrod","Treated"="darkorange4","Unknown"="grey","TreatedSCTLD"="orange"),labels=c("Healthy","SCTLD","Dead","Unknown"),drop=FALSE)+
+  ggtitle("Nearshore")+
+  theme(axis.text.x = element_text(angle=70, hjust=1))
+
+```
+
+### Now let's 'group by' down to Plot, not species at each plot
+
+With only species that got disease
+```{r}
+#group by species, site, plot, timept and state
+data_long_dis<-data_long%>%
+  filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
+  droplevels()
+tryfreq_plot_dis<-data_long_dis%>%
+  dplyr::group_by(Site,Plot,timept,state)%>%
+  dplyr::summarise(num=n())%>%
+  dplyr::group_by(Site,Plot,timept)%>%
+  dplyr::mutate(Fraction=num/sum(num))
+
+tryfreq_plot_dis
+
+
+#expands the data so that all health state factors are listed for each timepoint for each species and joins it with old tp_counts... it also takes a long time.
+tp_counts2_plot_dis<-tryfreq_plot_dis%>%
+  expand(state)%>% 
+  left_join(tryfreq_plot_dis)
+#previous step expands it by listing as NA, and now we make it so that NAs are 0s
+tp_counts2_plot_dis[is.na(tp_counts2_plot_dis)] <- 0
+tp_counts2_plot_dis
+
+fracs_plot_dis<-as.data.frame(tp_counts2_plot_dis)
+colnames(fracs_plot_dis)[colnames(fracs_plot_dis)=="num"] <- "num_cols"
+colnames(fracs_plot_dis)[colnames(fracs_plot_dis)=="Fraction"] <- "fraction"
+summary(fracs_plot_dis)
+head(fracs_plot_dis)
+fracs_plot_dis$dates<-as.character(fracs_plot_dis$timept)
+fracs_plot_dis$dates<-as.Date(fracs_plot_dis$dates,"%m-%d-%y")
+```
+
+```{r}
+sitelabels<-c('1'="Mid-Channel",'2'="Offshore",'3'="Nearshore")
+site1<-fracs_plot_dis%>%
+  filter(Site==1)
+species_time<-ggplot(data=site1,mapping=aes(x=dates,y=fraction,color=state))
+site1plot<-species_time+
+  geom_line(aes(color=state))+facet_grid(Plot~Site,labeller=labeller(Site = sitelabels))+
+  geom_point(aes(color=state))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous(" ",breaks=c(0,0.2,0.4,0.6,0.8,1))+
+  scale_x_date("Survey Dates 2018-2019")+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=FALSE)
+
+site2<-fracs_plot_dis%>%
+  filter(Site==2)
+species_time<-ggplot(data=site2,mapping=aes(x=dates,y=fraction,color=state))
+site2plot<-species_time+
+  geom_line(aes(color=state))+facet_grid(Plot~Site,labeller=labeller(Site = sitelabels))+
+  geom_point(aes(color=state))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous(" ",breaks=c(0,0.2,0.4,0.6,0.8,1))+
+  scale_x_date("Survey Dates 2018-2019")+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=FALSE)
+
+site3<-fracs_plot_dis%>%
+  filter(Site==3)
+species_time<-ggplot(data=site3,mapping=aes(x=dates,y=fraction,color=state))
+site3plot<-species_time+
+  geom_line(aes(color=state))+facet_grid(Plot~Site,labeller=labeller(Site = sitelabels))+
+  geom_point(aes(color=state))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous("Fraction of Colonies with SCTLD",breaks=c(0,0.2,0.4,0.6,0.8,1))+
+  scale_x_date("Survey Dates 2018-2019")+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=FALSE)
+
+ggarrange(site3plot,site1plot,site2plot, ncol=3,common.legend=TRUE)
+
+
+```
+
+### Get stats (mean +/- Standard error) for each site where plots are treated as replicates
+#### fraction of colonies 
+```{r}
+
+site.means<-aggregate(fraction~state+dates+Site,FUN=mean,data=fracs_plot_dis)
+site.se<-aggregate(fraction~state+dates+Site,FUN=function(x) sd(x)/sqrt(length(x)),data=fracs_plot_dis)
+#site.se
+
+stats<-cbind(site.means,stander=site.se$fraction)
+
+#sitelabels
+stats$Site<-as.factor(stats$Site)
+levels(stats$Site)
+stats$Site <- factor(stats$Site,levels(stats$Site)[c(3,1,2)])
+
+#just look at diseased and dead
+stats_filtered<-stats%>%
+  filter(state!="Unknown",state!="Healthy")
+
+ggplot(data=stats_filtered,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_line(aes(color=state))+facet_wrap(~Site,nrow=3,labeller=labeller(Site = sitelabels))+
+  geom_point(aes(color=state))+geom_pointrange(aes(color=state,ymin=fraction-1.96*stander, ymax=fraction+1.96*stander))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous("Fraction of Colonies with SCTLD",c(0,0.2),breaks=c(0,0.05,0.1,0.15,0.2))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black"),drop=TRUE)+
+  #ggtitle("Disease Prevalence (all surveyed corals)")+
+  theme(axis.text.x = element_text(angle=70, hjust=1))+scale_x_date("Survey Dates 2018-2019", breaks=stats$dates,date_labels="%b %d %y")+theme(legend.position = "right")
+
+
+```
+
+#### all data temporal dynamics
+```{r}
+#sites (averaged plots) are replicates
+
+all.means<-aggregate(fraction~state+dates,FUN=mean,data=site.means)
+all.se<-aggregate(fraction~state+dates,FUN=function(x) sd(x)/sqrt(length(x)),data=site.means)
+all.stats<-cbind(all.means,stander=all.se$fraction)
+#all.stats
+
+#all_filtered<-all.stats%>%
+ # filter(state!="Unknown")
+
+### you have to play with this bit to get it in the right order
+#stats_filtered$Site <- factor(stats_filtered$Site,levels(stats_filtered$Site)[c(3,2,1)])
+#levels(stats_filtered$Site)
+#sitelabels
+
+species_time<-ggplot(data=all.stats,mapping=aes(x=dates,y=fraction,color=state))
+species_time+
+  geom_line(aes(color=state))+
+  geom_point(aes(color=state))+geom_pointrange(aes(color=state,ymin=fraction-1.96*stander, ymax=fraction+1.96*stander))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous("Fraction of Colonies with SCTLD",c(0.1,1),breaks=c(0.1,0.2,0.4,0.6,0.8,1))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+  #ggtitle("Disease Prevalence (all surveyed corals)")+
+  theme(axis.text.x = element_text(angle=70, hjust=1))+scale_x_date("Survey Dates 2018-2019", breaks=all.stats$dates,date_labels="%b %d %y")+theme(legend.position = "bottom")
+
+
+```
+#### blow up to dis and dead, fraction colonies
+```{r}
+
+all_filtered<-all.stats%>%
+  filter(state!="Healthy",state!="Unknown")
+
+species_time<-ggplot(data=all_filtered,mapping=aes(x=dates,y=fraction,color=state))
+species_time+
+  geom_line(aes(color=state))+
+  geom_point(aes(color=state))+geom_pointrange(aes(color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  theme_bw()+
+  theme(panel.grid.minor =element_blank())+
+  scale_y_continuous("Fraction of colonies",c(0,0.2),breaks=c(0,0.05,0.1,0.15,0.2))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+  #ggtitle("Disease Prevalence (all surveyed corals)")+
+  theme(axis.text.x = element_text(angle=70, hjust=1))+scale_x_date("Survey Dates 2018-2019", breaks=all.stats$dates,date_labels="%b %d %y")+theme(legend.position = "bottom")
+
+```
+
+### Now with incidence
+
+need the new_inf_corals function to determine the newly diseased corals
+```{r}
+new_inf_corals<-function(df,steps,x){
+  ## newly_I
+  newly_I<-matrix(0, nrow = nrow(df), ncol = steps) #blank matrix for storing newly infected corals
+  #newly_I
+  for (i in 1:steps){ #for each survey time point
+    col<-x+i #start with first tp after init tp
+    prev<-x+i-1
+    for (j in 1:(nrow(df))){ #for each row in the df
+      #print (df[j,col])
+      if ( df[j,col]=="SCTLD" ){ #if it's disease
+        #print( "found one")
+        if (df[j,prev]!="SCTLD"){ # and if it wasnt diseased before
+          newly_I[j,i]<-1 #add it to newly infected
+        }
+      }
+    }
+  }
+  return(newly_I)
+}
+```
+
+```{r}
+#need just suscpetible species
+dis.sps<-my.data%>%
+  filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
+  droplevels()
+```
+
+```{r}
+#ok, shorten dis.sps dataset to just 10/30/19-12/6/19, becuase didnt see disease until then
+## this is the wide format dataset
+#colnames(dis.sps)
+my.datas<-dis.sps%>%
+  dplyr::select(Site,Plot,Sps,coords_x,coords_y,X8.17.18,X10.30.18,X11.9.18,X11.29.18,X12.13.18,X1.4.19,X1.18.19,X2.8.19,X3.4.19,X3.21.19,X4.11.19,X5.2.19,X5.16.19,X5.28.19,X6.13.19,X7.1.19,X7.22.19,X8.16.19,X9.17.19,X10.14.19,X11.12.19,X12.6.19)
+colnames(dis.sps)
+#refactor data to all have same levels
+my.datas$X8.17.18<-factor(my.datas$X8.17.18,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X10.30.18<-factor(my.datas$X10.30.18,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X11.9.18<-factor(my.datas$X11.9.18,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X11.29.18<-factor(my.datas$X11.29.18,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X12.13.18<-factor(my.datas$X12.13.18,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X1.4.19<-factor(my.datas$X1.4.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X1.18.19<-factor(my.datas$X1.18.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+
+my.datas$X2.8.19<-factor(my.datas$X2.8.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X3.4.19<-factor(my.datas$X3.4.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X3.21.19<-factor(my.datas$X3.21.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X4.11.19<-factor(my.datas$X4.11.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X5.2.19<-factor(my.datas$X5.2.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X5.16.19<-factor(my.datas$X5.16.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X5.28.19<-factor(my.datas$X5.28.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X6.13.19<-factor(my.datas$X6.13.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X7.1.19<-factor(my.datas$X7.1.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X7.22.19<-factor(my.datas$X7.22.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X8.16.19<-factor(my.datas$X8.16.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X9.17.19<-factor(my.datas$X9.17.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X10.14.19<-factor(my.datas$X10.14.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X11.12.19<-factor(my.datas$X11.12.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+my.datas$X12.6.19<-factor(my.datas$X12.6.19,levels=c("Healthy","SCTLD","Dead","Unknown"))
+
+head(my.datas)
+```
+
+```{r}
+#Split into plots for analysis
+s3.p45<-my.datas%>%
+  filter(Plot==45)
+s3.p47<-my.datas%>%
+  filter(Plot==47)
+
+s1.p23<-my.datas%>%
+  filter(Plot==23)
+s1.p25<-my.datas%>%
+  filter(Plot==25)
+
+s2.p27<-my.datas%>%
+  filter(Plot==27)
+s2.p28<-my.datas%>%
+  filter(Plot==28)
+
+```
+#### Incidence Rates 
+```{r}
+plotnum<-s3.p45
+s3.p45
+x<-6 #start date
+steps<-ncol(plotnum)-x 
+steps
+p45.newinf<-new_inf_corals(plotnum,steps,x)
+colSums(p45.newinf)
+#length(colSums(p45.newinf))
+
+p45.incidence<-cbind(colnames(s3.p45)[7:ncol(plotnum)], (colSums(p45.newinf)))
+p45.incidence<-data.frame(p45.incidence)
+colnames(p45.incidence)<-c("date","newI")
+p45.incidence
+
+#now plot 47
+plotnum<-s3.p47
+x<-6 #start date
+steps<-ncol(plotnum)-x
+p47.newinf<-new_inf_corals(plotnum,steps,x)
+#p47.newinf
+#length(colSums(p47.newinf))
+p47.incidence<-cbind(colnames(s3.p47)[7:ncol(plotnum)],(colSums(p47.newinf)))
+p47.incidence<-data.frame(p47.incidence)
+colnames(p47.incidence)<-c("date","newI")
+#p47.incidence
+
+plotnum<-s1.p23
+x<-6 #start date
+steps<-ncol(plotnum)-x 
+steps
+p23.newinf<-new_inf_corals(plotnum,steps,x)
+p23.newinf
+#length(colSums(p45.newinf))
+
+p23.incidence<-cbind(colnames(s1.p23)[7:ncol(plotnum)], (colSums(p23.newinf)))
+p23.incidence<-data.frame(p23.incidence)
+colnames(p23.incidence)<-c("date","newI")
+p23.incidence
+
+#now plot 25
+plotnum<-s1.p25
+x<-6 #start date
+steps<-ncol(plotnum)-x
+p25.newinf<-new_inf_corals(plotnum,steps,x)
+#p47.newinf
+#length(colSums(p47.newinf))
+p25.incidence<-cbind(colnames(s1.p25)[7:ncol(plotnum)],(colSums(p25.newinf)))
+p25.incidence<-data.frame(p25.incidence)
+colnames(p25.incidence)<-c("date","newI")
+#p47.incidence
+
+plotnum<-s2.p27
+
+x<-6 #start date
+steps<-ncol(plotnum)-x 
+steps
+p27.newinf<-new_inf_corals(plotnum,steps,x)
+p27.newinf
+#length(colSums(p45.newinf))
+
+p27.incidence<-cbind(colnames(s2.p27)[7:ncol(plotnum)], (colSums(p27.newinf)))
+p27.incidence<-data.frame(p27.incidence)
+colnames(p27.incidence)<-c("date","newI")
+p27.incidence
+
+#now plot 28
+plotnum<-s2.p28
+x<-6 #start date
+steps<-ncol(plotnum)-x
+p28.newinf<-new_inf_corals(plotnum,steps,x)
+#p28.newinf
+#length(colSums(p47.newinf))
+p28.incidence<-cbind(colnames(s2.p28)[7:ncol(plotnum)],(colSums(p28.newinf)))
+p28.incidence<-data.frame(p28.incidence)
+colnames(p28.incidence)<-c("date","newI")
+#p47.incidence
+
+
+plots.incidence<-cbind(p45.incidence,p47.incidence[2],p23.incidence[2],p25.incidence[2],p27.incidence[2],p28.incidence[2])
+colnames(plots.incidence)<-c("date","plot45","plot47","plot23","plot25","plot27","plot28")
+plots.incidence$date<-revalue(plots.incidence$date, c("X10.30.18" ="10-30-18","X11.9.18"="11-09-18","X11.29.18"="11-29-18", "X12.13.18"="12-13-18" ,"X1.4.19"="01-04-19"  , "X1.18.19" ="01-18-19","X2.8.19"="02-08-19", "X3.4.19"="03-04-19","X3.21.19"="03-21-19","X4.11.19"= "04-11-19","X5.2.19"="05-02-19","X5.16.19"="05-16-19","X5.28.19"="05-28-19","X6.13.19"="06-13-19","X7.1.19"="07-01-19","X7.22.19"="07-22-19","X8.16.19"="08-16-19","X9.17.19"="09-17-19","X10.14.19"="10-14-19","X11.12.19"="11-12-19","X12.6.19"="12-06-19"))
+
+plots.incidence$date<-as.character(plots.incidence$date)
+plots.incidence$date<-as.Date(plots.incidence$date,"%m-%d-%y")
+plots.incidence
+plots.incidence$plot45<-as.numeric(plots.incidence$plot45)
+plots.incidence$plot47<-as.numeric(plots.incidence$plot47)
+plots.incidence$plot23<-as.numeric(plots.incidence$plot23)
+plots.incidence$plot25<-as.numeric(plots.incidence$plot25)
+plots.incidence$plot27<-as.numeric(plots.incidence$plot27)
+plots.incidence$plot28<-as.numeric(plots.incidence$plot28)
+
+incidence_long <- gather(plots.incidence, key=plot, value=newI, plot45:plot28,factor_key = TRUE)
+incidence_long$newI<-as.numeric(incidence_long$newI)
+
+plots.incidence
+str(incidence_long)
+ggplot(incidence_long, aes(x=date, y=newI, col=plot)) + 
+  geom_path()+theme(panel.background = element_blank())+ theme(text = element_text(family = "Times New Roman"),axis.text.x = element_text(angle = 70, hjust = 1))+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+labs(x="Survey Dates",y="Disease Incidence")+scale_x_date(date_breaks = "2 week", date_minor_breaks = "1 week",date_labels="%b %d")+geom_point()+scale_y_continuous(breaks=seq(0,18,2),expand = c(0, 0),limits=c(0,18.5))
+```
+
+```{r}
+tot.inc<-rowSums(plots.incidence[,2:7])
+tot.inc
+plots.incidence$date
+all.incidence<-data.frame("Date"=plots.incidence$date,"newInc"=tot.inc)
+all.incidence
+all.incidence$newInc.scaled<-all.incidence$newInc/300
+```
+
+
+```{r}
+#### all data
+
+ggplot()+
+  geom_line(data=all_filtered,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=all_filtered,mapping=aes(x=dates,y=fraction,color=state))+geom_pointrange(data=all_filtered,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+  geom_bar(data=all.incidence,aes(x=Date,y=newInc.scaled),stat="identity",fill="light grey")+
+  scale_y_continuous(name = "Fraction of colonies", breaks=seq(0,.2,.01),expand = c(0, 0),limits=c(0,.2),sec.axis = sec_axis(~.*300,name ="Disease incidence",breaks=c(0,5,10,15,20,25,30,35)))+
+  geom_line(data=all_filtered,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=all_filtered,mapping=aes(x=dates,y=fraction,color=state))+geom_pointrange(data=all_filtered,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+
+  theme(legend.position = "bottom")+
+  theme(panel.background = element_blank())+ 
+  theme(text = element_text(family = "Times New Roman"),axis.text.x = element_text(angle = 70, hjust = 1))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(x="Survey Dates",color="State")+
+  scale_x_date( breaks=all_filtered$dates,date_labels="%b %d %y")
+
+```
+This is just the susceptible species disease incidence, sctld prevalence (fraction of cols with SCTLD signs), and dead colonies. 
+
+##### Split by site
+
+```{r}
+#stats_filtered is from above, where I used the aggregate function to get mean and SE
+
+stats_shortfiltered<-subset(stats_filtered,subset=dates>="2018-10-30")
+
+incidence_long$site<-c(rep(3,42),rep(1,42),rep(2,42))
+sites.incidence<-aggregate(newI~site+date,FUN=sum,data=incidence_long)
+sites.incidence
+str(stats_shortfiltered)
+```
+
+```{r}
+sites.incidence$newInc.scaled<-sites.incidence$newI/100
+prev.data<-subset(stats_shortfiltered,subset=Site=="1")
+inc.data<-subset(sites.incidence,subset=site=="1")
+inc.data<-subset(inc.data,subset=date>="2018-10-30")
+class(inc.data$date)
+
+prev.data
+s1.ts<-ggplot()+
+  geom_line(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_pointrange(data=prev.data,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+  geom_bar(data=inc.data,aes(x=date,y=newInc.scaled),stat="identity",fill="light grey")+
+  scale_y_continuous(name = "Fraction of colonies", breaks=seq(0,.1,.01),expand = c(0, 0),limits=c(0,.1),sec.axis = sec_axis(~.*100,name ="Disease incidence",breaks=c(0,2,4,6,8,10)))+
+  geom_line(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+geom_pointrange(data=prev.data,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+
+  theme(legend.position = "none")+
+  theme(panel.background = element_blank())+ 
+  theme(text = element_text(family = "Times New Roman"),axis.text.x =element_blank())+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(x="",color="State")+
+  scale_x_date( breaks=stats_filtered$dates,date_labels="")
+s1.ts
+```
+```{r}
+prev.data<-subset(stats_shortfiltered,subset=Site=="2")
+
+inc.data<-subset(sites.incidence,subset=site=="2")
+inc.data<-subset(inc.data,subset=date>="2018-10-30")
+prev.data
+s2.ts<-ggplot()+
+  geom_line(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_pointrange(data=prev.data,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+  geom_bar(data=inc.data,aes(x=date,y=newInc.scaled),stat="identity",fill="light grey")+
+  scale_y_continuous(name = "Fraction of colonies", breaks=seq(0,.1,.01),expand = c(0, 0),limits=c(0,.1),sec.axis = sec_axis(~.*100,name ="Disease incidence",breaks=c(0,2,4,6,8,10)))+
+  geom_line(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+geom_pointrange(data=prev.data,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+
+  theme(legend.position = "none")+
+  theme(panel.background = element_blank())+ 
+  theme(text = element_text(family = "Times New Roman"),axis.text.x = element_blank())+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(x="",color="State")+
+  scale_x_date( breaks=stats_filtered$dates,date_labels="%b %d %y")
+
+s2.ts
+```
+```{r}
+prev.data<-subset(stats_shortfiltered,subset=Site=="3")
+
+inc.data<-subset(sites.incidence,subset=site=="3")
+
+inc.data<-subset(inc.data,subset=date>="2018-10-30")
+
+s3.ts<-ggplot()+
+  geom_line(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_pointrange(data=prev.data,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+  geom_bar(data=inc.data,aes(x=date,y=newInc.scaled),stat="identity",fill="light grey")+
+  scale_y_continuous(name = "Fraction of colonies", breaks=seq(0,.3,.05),expand = c(0, 0),limits=c(0,.30),sec.axis = sec_axis(~.*100,name ="Disease incidence",breaks=c(0,5,10,15,20,25,30)))+
+  geom_line(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+
+  geom_point(data=prev.data,mapping=aes(x=dates,y=fraction,color=state))+geom_pointrange(data=prev.data,aes(x=dates,y=fraction,color=state,ymin=fraction-stander, ymax=fraction+stander))+
+  scale_colour_manual(values=c("Healthy"="blue","SCTLD"="red","Dead"="black","Unknown"="grey"),drop=TRUE)+
+
+  theme(legend.position = "bottom")+
+  theme(panel.background = element_blank())+ 
+  theme(text = element_text(family = "Times New Roman"),axis.text.x =element_blank())+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(x="",color="State")+
+  scale_x_date( breaks=stats_filtered$dates,date_labels="")+ 
+  theme(text = element_text(family = "Times New Roman"),axis.text.x = element_text(angle = 70, hjust = 1))+
+  scale_x_date( breaks=stats_filtered$dates,date_labels="%d %b %y")
+
+s3.ts
+
+```
+
+
+
+```{r,fig.height=4,fig.width=4}
+#tiff("Figure2.tiff",width=180, height=300,units="mm",res=300)
+(s2.ts/s1.ts/s3.ts) + plot_annotation(tag_levels="A")
+#dev.off()
+```
+
+
+

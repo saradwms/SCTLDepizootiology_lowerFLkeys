@@ -1,0 +1,735 @@
+---
+title: "Ripleys K Analyses"
+output: html_notebook
+---
+## This notebook includes:
+
+- Data-wrangling for spatial dynamics, using "SCTLD_END_exta.csv"
+
+- Functions for running and plotting Ripley's K analyses
+
+- Figure 7 in paper
+
+```{r, message=FALSE, warning=FALSE}
+library(zoo) # has rollmeans function for calculating AUC
+library(igraph)
+library(spdep)
+library(spatstat)
+library(abind)
+library(sciplot)
+library(tidyverse)
+library(ggplot2)
+library(RColorBrewer)
+library(plyr)
+library(dplyr)
+library(ggpubr)
+library(vegan)
+library(nlme)
+library(car)
+library(patchwork)
+library(viridis)
+getwd()
+```
+
+```{r}
+my.data<-read.csv("SCTLD_END_exta.csv") ## this file is shortened and doesnt included the treatment sites
+
+#move to a long format so that every row is now an observation of a colony at a single timepoint
+data_long <- gather(my.data, key=timept, value=state, X5.1.18:X12.6.19,factor_key = TRUE)
+data_long<-data_long[,-c(8,9)] #drop column 8:10, which is glom and not needed anymore
+#head(data_long)
+#make the health states factors
+data_long$state<-factor(data_long$state,levels=c("Healthy","SCTLD","Dead","Unknown"))
+#revalue the timepoints
+data_long$timept<-revalue(data_long$timept, c( "X5.1.18"="05-10-18","X6.1.18"="06-01-18","X6.21.18"="06-21-18","X7.16.18"="07-16-18","X8.17.18"="08-17-18","X10.30.18"="10-30-18", "X11.9.18"="11-09-18", "X11.29.18"="11-29-18","X12.13.18"="12-13-18","X1.4.19"="01-04-19","X1.18.19"="01-18-19","X2.8.19"="02-08-19","X3.4.19"="03-04-19","X3.21.19"="03-21-19","X4.11.19"="04-11-19","X5.2.19"="05-02-19","X5.16.19"="05-16-19","X5.28.19"="05-28-19","X6.13.19"="06-13-19","X7.1.19"="07-01-19","X7.22.19"="07-22-19","X8.16.19"="08-16-19","X9.17.19"="09-17-19","X10.14.19"="10-14-19","X11.12.19"="11-12-19","X12.6.19"="12-06-19"))
+head(data_long)
+summary(data_long$Plot)
+
+##keep only susceptible species
+data_filtered<-data_long%>%
+  filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
+  droplevels()
+
+Plot45 <-data_filtered %>%
+  dplyr::filter(coords_x!="NA",Plot==45)
+
+Plot47 <- data_filtered %>%
+  dplyr::filter(coords_x!="NA",Plot==47)
+
+```
+## Ripley's K
+Into timepoints of disease colonies per plot 
+```{r}
+
+p47<-as.data.frame(Plot47)
+
+p45<-as.data.frame(Plot45)
+#str(p47)
+#now just disease
+p47dis<-as.data.frame(filter(Plot47,state=="SCTLD"))
+
+p45dis<-as.data.frame(filter(Plot45,state=="SCTLD"))
+
+
+#split 47 disease tps
+#start on March 4 because that's when disease cases >5 for each
+p47dis_tp1<-(subset(p47dis,timept=="03-04-19",select=c(coords_x,coords_y)))
+
+p47dis_tp2<-(subset(p47dis,timept=="03-21-19",select=c(coords_x,coords_y)))
+
+p47dis_tp3<-(subset(p47dis,timept=="04-11-19",select=c(coords_x,coords_y)))
+
+p47dis_tp4<-(subset(p47dis,timept=="05-02-19",select=c(coords_x,coords_y)))
+
+p47dis_tp5<-(subset(p47dis,timept=="05-16-19",select=c(coords_x,coords_y)))
+
+p47dis_tp6<-(subset(p47dis,timept=="05-28-19",select=c(coords_x,coords_y)))
+
+p47dis_tp7<-(subset(p47dis,timept=="06-13-19",select=c(coords_x,coords_y)))
+
+p47dis_tp8<-(subset(p47dis,timept=="07-01-19",select=c(coords_x,coords_y)))
+p47dis_tp9<-(subset(p47dis,timept=="07-22-19",select=c(coords_x,coords_y)))
+p47dis_tp10<-(subset(p47dis,timept=="08-16-19",select=c(coords_x,coords_y)))
+p47dis_tp11<-(subset(p47dis,timept=="09-17-19",select=c(coords_x,coords_y)))
+p47dis_tp12<-(subset(p47dis,timept=="10-14-19",select=c(coords_x,coords_y)))
+p47dis_tp13<-(subset(p47dis,timept=="11-12-19",select=c(coords_x,coords_y)))
+p47dis_tp14<-(subset(p47dis,timept=="12-06-19",select=c(coords_x,coords_y)))
+
+#split 45 disease tps
+p45dis_tp1<-(subset(p45dis,timept=="03-04-19",select=c(coords_x,coords_y)))
+
+p45dis_tp2<-(subset(p45dis,timept=="03-21-19",select=c(coords_x,coords_y)))
+
+p45dis_tp3<-(subset(p45dis,timept=="04-11-19",select=c(coords_x,coords_y)))
+
+p45dis_tp4<-(subset(p45dis,timept=="05-02-19",select=c(coords_x,coords_y)))
+
+p45dis_tp5<-(subset(p45dis,timept=="05-16-19",select=c(coords_x,coords_y)))
+
+p45dis_tp6<-(subset(p45dis,timept=="05-28-19",select=c(coords_x,coords_y)))
+
+p45dis_tp7<-(subset(p45dis,timept=="06-13-19",select=c(coords_x,coords_y)))
+
+p45dis_tp8<-(subset(p45dis,timept=="07-01-19",select=c(coords_x,coords_y)))
+p45dis_tp9<-(subset(p45dis,timept=="07-22-19",select=c(coords_x,coords_y)))
+p45dis_tp10<-(subset(p45dis,timept=="08-16-19",select=c(coords_x,coords_y)))
+p45dis_tp11<-(subset(p45dis,timept=="09-17-19",select=c(coords_x,coords_y)))
+p45dis_tp12<-(subset(p45dis,timept=="10-14-19",select=c(coords_x,coords_y)))
+p45dis_tp13<-(subset(p45dis,timept=="11-12-19",select=c(coords_x,coords_y)))
+p45dis_tp14<-(subset(p45dis,timept=="12-06-19",select=c(coords_x,coords_y)))
+
+#get all cols at one timepoint
+p47.all<-(subset(p47,timept=="06-13-19",select=c(coords_x,coords_y)))
+
+#p47.all
+p45.all<-(subset(p45,timept=="06-13-19",select=c(coords_x,coords_y)))
+
+```
+
+### Custom Functions for running Ripley's K analyses
+```{r}
+#Runs and Plots results of Ripleys K
+myfunc.ppp.Kest<-function(data,w,name){
+  data.ppp <- as.ppp(data,w)
+  # plot(data.ppp)
+  lhatK <-Kest(data.ppp)
+  #dividing by pi and taking the square root, linearizes the Ripley's value
+  plot(lhatK$r,sqrt(lhatK$iso/pi)-lhatK$r,cex.axis=1.5,cex.lab=1.5,xlab="r (m)",col="green",ylab="L(r)",lty=1,main=name)
+  # plot(lhatK$r,lhatK$iso,cex.axis=1.5,cex.lab=1.5,xlab="r (m)",col="green",ylab="L(r)",lty=1,main=name)
+  return(c(data.ppp,lhatK)) #return the lhatK and ppp for use later if needed
+}
+
+#### Function to make null distribution Plot
+#allpts & dispts should be my normal dataframes
+myfunc.nulldistrKest<-function(allpts,dispts,w,n,name){
+  #get info for all
+  all<-as.data.frame(t(allpts))
+  allX<-t(all)
+  
+  all.spp <- unique(as.ppp(allX,w))
+  #print(anyDuplicated(all.spp))
+  all.lhat <-Kest(all.spp)
+  
+  #get info for dis
+  dis<-as.data.frame(t(dispts))
+  disX<-t(dis)
+  dis.spp <- unique(as.ppp(disX,w))
+  #print(anyDuplicated(dis.spp))
+  dis.lhat <-Kest(dis.spp)
+  
+  plot(dis.lhat$r,sqrt(dis.lhat$iso/pi)-dis.lhat$r,cex.axis=1.5,cex.lab=1.5,xlab="r (m)",ylab="L(r)",lty=0,pch=NA,main=name)
+  for (i in 1:1000){
+    all.samp<-sample(all,n,replace=FALSE)# n=total number of disease points to sample from all point in the plot
+    x <-t(all.samp)
+    all.samp.spp <- unique(as.ppp(x,w))
+    #print(anyDuplicated(all.samp.spp))
+    all.samp.lhat <-Kest(all.samp.spp)
+    lines(all.samp.lhat$r,sqrt(all.samp.lhat$iso/pi)-all.samp.lhat$r,xlab="r (meters)",col="gray",lty=1,lwd=1)
+  }
+  lines(all.lhat$r,sqrt(all.lhat$theo/pi)-all.lhat$r,lwd=1,lty=8,col="black")
+  lines(dis.lhat$r,sqrt(dis.lhat$iso/pi)-dis.lhat$r,lwd=1,lty=1,col="red")
+  Hmisc::minor.tick(nx=10, ny=5, tick.ratio=0.5)
+}
+
+
+#### Functions to get difference in L(R) between actual and null distributions ######
+
+### Function to get top of null distribution #####
+top_of_RKnull<-function(allpts,w,n){
+  all<-as.data.frame(t(allpts))
+  allX<-t(all)
+  all.spp <- unique(as.ppp(allX,w))
+  all.rk <-Kest(all.spp)
+  all.lhat_adj<-sqrt(all.rk$iso/pi)-all.rk$r
+  plot(all.rk$r,sqrt(all.rk$iso/pi)-all.rk$r,cex.axis=1.5,cex.lab=1.5,xlab="r (m)",ylab="L(r)",lty=1)
+  for (i in 1:1000){
+    all.samp<-sample(all,n,replace=FALSE)# n=total number of disease points to sample from all point in the plot
+    x <-t(all.samp)
+    all.samp.spp <- unique(as.ppp(x,w))
+    #print(anyDuplicated(all.samp.spp))
+    all.samp.rk <-Kest(all.samp.spp)
+    l_adj<-sqrt(all.samp.rk$iso/pi)-all.samp.rk$r
+    all.lhat_adj<-cbind(all.lhat_adj,l_adj)
+    lines(all.samp.rk$r,sqrt(all.samp.rk$iso/pi)-all.samp.rk$r,xlab="r (meters)",col="gray",lty=1,lwd=1)
+    
+  }
+  ##radius stays same each time
+  linemaxs<-colSums(all.lhat_adj)
+  maxline<-max(linemaxs)
+  best_index<-which(linemaxs==max(colSums(all.lhat_adj)))
+  null_line<-all.lhat_adj[,best_index]
+  return(null_line)
+}
+
+### Function to get difference between top of null and disease line #####
+lhat_diffs<-function(null_line,dispts,w,n){
+  dis<-as.data.frame(t(dispts))
+  disX<-t(dis)
+  dis.spp <- unique(as.ppp(disX,w))
+  dis.rk <-Kest(dis.spp)
+  dis.lhat_adj<-sqrt(dis.rk$iso/pi)-dis.rk$r
+  lhat_dif<-dis.lhat_adj-null_line
+  plot(dis.rk$r,lhat_dif,type="l")
+  abline(h=0)
+  results<-cbind(dis.rk$r,dis.lhat_adj,null_line,lhat_dif)
+  return(results)
+}
+
+
+### Function to get top of null distribution WITH PLOT #####
+top_of_RKnull_keepforplot<-function(allpts,w,n){
+  all<-as.data.frame(t(allpts))
+  allX<-t(all)
+  all.spp <- unique(as.ppp(allX,w))
+  all.rk <-Kest(all.spp)
+  all.lhat_adj<-sqrt(all.rk$iso/pi)-all.rk$r
+  my.mat<-matrix(nrow=513,ncol=1000)
+  plot(all.rk$r,sqrt(all.rk$iso/pi)-all.rk$r,cex.axis=1.5,cex.lab=1.5,xlab="r (m)",ylab="L(r)",lty=1)
+  
+  for (i in 1:1000){
+    all.samp<-sample(all,n,replace=FALSE)# n=total number of disease points to sample from all point in the plot
+    x <-t(all.samp)
+    all.samp.spp <- unique(as.ppp(x,w))
+    #print(anyDuplicated(all.samp.spp))
+    all.samp.rk <-Kest(all.samp.spp)
+    l_adj<-sqrt(all.samp.rk$iso/pi)-all.samp.rk$r
+    all.lhat_adj<-cbind(all.lhat_adj,l_adj)
+    lines(all.samp.rk$r,sqrt(all.samp.rk$iso/pi)-all.samp.rk$r,xlab="r (meters)",col="gray",lty=1,lwd=1)
+    my.mat[,i]<-sqrt(all.samp.rk$iso/pi)-all.samp.rk$r
+  }
+  ##radius stays same each time
+  linemaxs<-colSums(all.lhat_adj)
+  maxline<-max(linemaxs)
+  best_index<-which(linemaxs==max(colSums(all.lhat_adj)))
+  null_line<-all.lhat_adj[,best_index]
+  my.df<-data.frame(my.mat)
+  results.df<-cbind(null_line,my.mat)
+  return(results.df)
+}
+
+
+##### func for using prev func output for plot #######
+myfunc.nullplot2<-function(null_line,dispts,allpts,w,n,name){
+  #get info for all
+  all<-as.data.frame(t(allpts))
+  allX<-t(all)
+  
+  all.spp <- unique(as.ppp(allX,w))
+  #print(anyDuplicated(all.spp))
+  all.lhat <-Kest(all.spp)
+  #get info for dis
+  dis<-as.data.frame(t(dispts))
+  disX<-t(dis)
+  dis.spp <- unique(as.ppp(disX,w))
+  #print(anyDuplicated(dis.spp))
+  dis.lhat <-Kest(dis.spp)
+  
+  plot(dis.lhat$r,sqrt(dis.lhat$iso/pi)-dis.lhat$r,cex.axis=1.5,cex.lab=1.5,xlab="r (m)",ylab="L(r)",lty=0,pch=NA,main=name)
+  for (i in 1:1000){
+    y<-null_line[,i+1]
+    lines(all.lhat$r[0:nrow(null_line)],y,xlab="r (meters)",col="gray",lty=1,lwd=1)
+  }
+  lines(all.lhat$r,sqrt(all.lhat$theo/pi)-all.lhat$r,lwd=1,lty=8,col="black")
+  lines(dis.lhat$r,sqrt(dis.lhat$iso/pi)-dis.lhat$r,lwd=1,lty=1,col="red")
+  Hmisc::minor.tick(nx=10, ny=5, tick.ratio=0.5)
+}
+```
+
+### Creating the null distribution and making the plots in the supplemental 
+
+```{r}
+w <- owin(c(-20,20),c(-20,20))
+n <- 100
+allpts<-p47.all
+dispts<-p47dis_tp6
+name<-"Quadrat 47 5/28/19"
+myfunc.nulldistrKest(allpts,dispts,w,n,name)
+
+```
+
+Since the null distribution is random each time, I saved the null distribution for each plot once and used the same null distribution for each time point
+
+
+```{r}
+p47.nl1<-read.csv("plot47RKnulldist.csv",colClasses = "numeric")
+
+myfunc.nullplot2(p47.nl1,p47dis_tp6,p47.all ,w,n=100,"Plot 47, May 28th 2019")
+
+p45.nl1<-read.csv("plot45RKnulldist.csv",colClasses = "numeric")
+myfunc.nullplot2(p45.nl1,p45dis_tp6,p45.all ,w,n=100,"Plot 45, May 28th 2019")
+
+```
+
+### Exctracting R, R range, and ABC from Ripley's K analyses for each timepoint
+
+```{r}
+#Saved just the top of the null distribution for each each quadrat which is used for getting values.
+p47.nl1<-read.csv("topofthenull_plot47.csv",header=T)
+p45.nl1<-read.csv("topofthenull_plot45.csv",header=T)
+w <- owin(c(-20,20),c(-20,20))
+n <- 100
+head(p45.nl1)
+```
+
+```{r}
+w <- owin(c(-20,20),c(-20,20))
+n <- 100
+# GET DIFS BETWEEN ALL TP DIS AND TOP OF NULL
+p45ld.tp1<-lhat_diffs(p45.nl1[,2],p45dis_tp1,w,n)
+p45ld.tp2<-lhat_diffs(p45.nl1[,2],p45dis_tp2,w,n)
+p45ld.tp3<-lhat_diffs(p45.nl1[,2],p45dis_tp3,w,n)
+p45ld.tp4<-lhat_diffs(p45.nl1[,2],p45dis_tp4,w,n)
+p45ld.tp5<-lhat_diffs(p45.nl1[,2],p45dis_tp5,w,n)
+p45ld.tp6<-lhat_diffs(p45.nl1[,2],p45dis_tp6,w,n)
+p45ld.tp7<-lhat_diffs(p45.nl1[,2],p45dis_tp7,w,n)
+p45ld.tp8<-lhat_diffs(p45.nl1[,2],p45dis_tp8,w,n)
+p45ld.tp9<-lhat_diffs(p45.nl1[,2],p45dis_tp9,w,n)
+p45ld.tp10<-lhat_diffs(p45.nl1[,2],p45dis_tp10,w,n)
+p45ld.tp11<-lhat_diffs(p45.nl1[,2],p45dis_tp11,w,n)
+p45ld.tp12<-lhat_diffs(p45.nl1[,2],p45dis_tp12,w,n)
+p45ld.tp13<-lhat_diffs(p45.nl1[,2],p45dis_tp13,w,n)
+p45ld.tp14<-lhat_diffs(p45.nl1[,2],p45dis_tp14,w,n)
+
+### now for plot 47
+
+p47ld.tp1<-lhat_diffs(p47.nl1[,2],p47dis_tp1,w,n)
+p47ld.tp2<-lhat_diffs(p47.nl1[,2],p47dis_tp2,w,n)
+p47ld.tp3<-lhat_diffs(p47.nl1[,2],p47dis_tp3,w,n)
+p47ld.tp4<-lhat_diffs(p47.nl1[,2],p47dis_tp4,w,n)
+p47ld.tp5<-lhat_diffs(p47.nl1[,2],p47dis_tp5,w,n)
+p47ld.tp6<-lhat_diffs(p47.nl1[,2],p47dis_tp6,w,n)
+p47ld.tp7<-lhat_diffs(p47.nl1[,2],p47dis_tp7,w,n)
+p47ld.tp8<-lhat_diffs(p47.nl1[,2],p47dis_tp8,w,n)
+p47ld.tp9<-lhat_diffs(p47.nl1[,2],p47dis_tp9,w,n)
+p47ld.tp10<-lhat_diffs(p47.nl1[,2],p47dis_tp10,w,n)
+p47ld.tp11<-lhat_diffs(p47.nl1[,2],p47dis_tp11,w,n)
+p47ld.tp12<-lhat_diffs(p47.nl1[,2],p47dis_tp12,w,n)
+p47ld.tp13<-lhat_diffs(p47.nl1[,2],p47dis_tp13,w,n)
+p47ld.tp14<-lhat_diffs(p47.nl1[,2],p47dis_tp14,w,n)
+
+```
+
+```{r}
+p47.ldiffs<-(cbind(p47ld.tp1[,1],p47ld.tp1[,4],p47ld.tp2[,4],p47ld.tp3[,4],p47ld.tp4[,4],p47ld.tp5[,4],p47ld.tp6[,4],p47ld.tp7[,4],p47ld.tp8[,4],p47ld.tp9[,4],p47ld.tp10[,4],p47ld.tp11[,4],p47ld.tp12[,4],p47ld.tp13[,4],p47ld.tp14[,4]))
+p47.ldiffs<-data.frame(p47.ldiffs)
+colnames(p47.ldiffs)<-c("r","03-04-19","03-21-19","04-11-19","05-02-19","05-16-19","05-28-19","06-13-19","07-01-19","07-22-19","08-16-19","09-17-19","10-14-19","11-12-19","12-06-19")
+
+#now plot 45
+p45.ldiffs<-(cbind(p45ld.tp1[,1],p45ld.tp1[,4],p45ld.tp2[,4],p45ld.tp3[,4],p45ld.tp4[,4],p45ld.tp5[,4],p45ld.tp6[,4],p45ld.tp7[,4],p45ld.tp8[,4],p45ld.tp9[,4],p45ld.tp10[,4],p45ld.tp11[,4],p45ld.tp12[,4],p45ld.tp13[,4],p45ld.tp14[,4]))
+p45.ldiffs<-data.frame(p45.ldiffs)
+colnames(p45.ldiffs)<-c("r","03-04-19","03-21-19","04-11-19","05-02-19","05-16-19","05-28-19","06-13-19","07-01-19","07-22-19","08-16-19","09-17-19","10-14-19","11-12-19","12-06-19")
+#nrow(p45.ldiffs)
+```
+
+#### Find R, the peak clustering radius
+
+For Quadrat/Plot 45, there are two peak clustering radii
+```{r}
+#look over the 25 point range around the max peak to get the best value of it. 
+maxdiff.low<-matrix(nrow=25,ncol=14)
+radius.low<-matrix(nrow=25,ncol=14)
+
+maxdiff.high<-matrix(nrow=25,ncol=14)
+radius.high<-matrix(nrow=25,ncol=14)
+###lower clusters
+p45.ldiffs.copy<-p45.ldiffs[1:205,]
+for (i in 2:ncol(p45.ldiffs.copy)){
+  p45.ldiffs.copy<-p45.ldiffs[1:205,]
+  for (j in 1:25){
+    maxdiff.low[j,i-1]<-max(p45.ldiffs.copy[,i]) 
+    index<-(which(p45.ldiffs.copy[,i]==max(p45.ldiffs.copy[,i])))
+    #print(index[1])
+    crad<-p45.ldiffs.copy$r[index[1]]
+    #print(crad)
+    radius.low[j,i-1]<-crad
+    p45.ldiffs.copy<-p45.ldiffs.copy[-index,]
+  }
+}
+p45.ldiffs.copy<-p45.ldiffs[205:513,]
+### upper clusters
+for (i in 2:ncol(p45.ldiffs.copy)){
+  p45.ldiffs.copy<-p45.ldiffs[205:513,]
+  for (j in 1:25){
+    maxdiff.high[j,i-1]<-max(p45.ldiffs.copy[,i]) 
+    index<-(which(p45.ldiffs.copy[,i]==max(p45.ldiffs.copy[,i])))
+    #print(index[1])
+    crad<-p45.ldiffs.copy$r[index[1]]
+    #print(crad)
+    radius.high[j,i-1]<-crad
+    p45.ldiffs.copy<-p45.ldiffs.copy[-index,]
+  }
+}
+
+radmat.p45.low<-radius.low
+maxdiffmat.p45.low<-maxdiff.low
+radmat.p45.high<-radius.high
+maxdiffmat.p45.high<-maxdiff.high
+maxdiffmat.p45.low[,3]
+colMeans(radmat.p45.high)
+colMeans(radmat.p45.low)
+
+
+```
+
+For quadrat/plot 47, there is just one peak clustering radius
+```{r}
+maxdiff<-matrix(nrow=50,ncol=14)
+radius<-matrix(nrow=50,ncol=14)
+p47.ldiffs.copy<-p47.ldiffs
+#p47.ldiffs.copy
+p47.ldiffs.copy<-p47.ldiffs
+for (i in 2:ncol(p47.ldiffs.copy)){
+  p47.ldiffs.copy<-p47.ldiffs
+  for (j in 1:50){
+    maxdiff[j,i-1]<-max(p47.ldiffs.copy[,i])
+    index<-(which(p47.ldiffs.copy[,i]==max(p47.ldiffs.copy[,i])))
+    #print(index[1])
+    crad<-p47.ldiffs.copy$r[index[1]]
+    #print(crad)
+    radius[j,i-1]<-crad
+    p47.ldiffs.copy<-p47.ldiffs.copy[-index,]
+  }
+}
+
+radmat.p47<-radius
+maxdiffmat.p47<-maxdiff
+colMeans(radmat.p47)
+```
+
+```{r}
+upR45<-colMeans(radmat.p45.high)
+lowR45<-colMeans(radmat.p45.low)
+R47<-colMeans(radmat.p47)
+datepts<-c(1,2,3,4,5,6,7,8,9,10,11,12,13,14)
+
+plot(datepts,upR45,ylim=c(0,10),t="l",col="green")
+lines(datepts,lowR45,col="blue")
+lines(datepts,R47,col="black",pch=2)
+```
+
+```{r}
+R.results<-cbind(c("03-04-19","03-21-19","04-11-19","05-02-19","05-16-19","05-28-19","06-13-19","07-01-19","07-22-19","08-16-19","09-17-19","10-14-19","11-12-19","12-06-19"),
+upR45,lowR45,R47)
+
+```
+
+#### Range of significant clustering
+
+plot 47 first
+```{r}
+top_range<-c()
+bottom_range<-c()
+#so we want to get the range of significant R
+for (j in 2:ncol(p47.ldiffs)){
+  #print(j)
+  #print(R47[j-1])
+  #the top half
+  top_start<-which(p47.ldiffs[,1]>=R47[j-1])[1]
+  #print(top_start)
+  top_ranges<-c()
+  for(i in top_start:nrow(p47.ldiffs)-1){
+   if(p47.ldiffs[i,j]>=0 & p47.ldiffs[i+1,j]<=0){
+     #print ("intercept")
+     top_ranges<-c(top_ranges,p47.ldiffs[i,1])
+    }
+  }
+  if(is.null(top_ranges)){
+    #print("inf")
+    top_ranges<-10
+  }
+  top_range<-c(top_range,top_ranges[1])
+  #print(top_range)
+
+  #the bottom half
+  bottom_start<-which(p47.ldiffs[,1]<=R47[j-1])
+  bottom_start<-bottom_start[length(bottom_start)]
+  bottom_start
+  bottom_ranges<-c()
+  for(i in 1:bottom_start){
+    if(p47.ldiffs[i,j]<=0 & p47.ldiffs[i+1,j]>=0){
+     #print ("intercept")
+      bottom_ranges<-c(bottom_ranges,p47.ldiffs[i,1])
+    }
+  }
+  bottom_range<-c(bottom_range, bottom_ranges[length(bottom_ranges)])
+  #print(bottom_range)
+}
+length(bottom_range)
+length(R47)
+length(top_range)
+top_range
+R47
+R47_withrange<-cbind(bottom_range,R47,top_range)
+```
+
+now plot 45, higher R
+```{r}
+top_range<-c()
+bottom_range<-c()
+#so we want to get the range of significant R
+for (j in 2:ncol(p45.ldiffs)){
+  #print(j)
+  #print(R47[j-1])
+  #the top half
+  top_start<-which(p45.ldiffs[,1]>=upR45[j-1])[1]
+  #print(top_start)
+  top_ranges<-c()
+  for(i in top_start:nrow(p45.ldiffs)-1){
+   if(p45.ldiffs[i,j]>=0 & p45.ldiffs[i+1,j]<=0){
+     #print ("intercept")
+     top_ranges<-c(top_ranges,p45.ldiffs[i,1])
+    }
+  }
+  if(is.null(top_ranges)){
+    #print("inf")
+    top_ranges<-10
+  }
+  top_range<-c(top_range,top_ranges[1])
+  #print(top_range)
+
+  #the bottom half
+  bottom_start<-which(p45.ldiffs[,1]<=upR45[j-1])
+  bottom_start<-bottom_start[length(bottom_start)]
+  bottom_start
+  bottom_ranges<-c()
+  for(i in 1:bottom_start){
+    if(p45.ldiffs[i,j]<=0 & p45.ldiffs[i+1,j]>=0){
+     #print ("intercept")
+      bottom_ranges<-c(bottom_ranges,p45.ldiffs[i,1])
+    }
+  }
+  bottom_range<-c(bottom_range, bottom_ranges[length(bottom_ranges)])
+  #print(bottom_range)
+}
+length(bottom_range)
+length(upR45)
+length(top_range)
+
+upR45_withrange<-cbind(bottom_range,upR45,top_range)
+upR45_withrange
+#row 5 may not be good 
+```
+Plot 45, lower R
+```{r}
+top_range<-c()
+bottom_range<-c()
+#so we want to get the range of significant R
+for (j in 2:ncol(p45.ldiffs)){
+  #print(j)
+  #print(R47[j-1])
+  #the top half
+  top_start<-which(p45.ldiffs[,1]>=lowR45[j-1])[1]
+  #print(top_start)
+  top_ranges<-c()
+  for(i in top_start:nrow(p45.ldiffs)-1){
+   if(p45.ldiffs[i,j]>=0 & p45.ldiffs[i+1,j]<=0){
+     #print ("intercept")
+     top_ranges<-c(top_ranges,p45.ldiffs[i,1])
+    }
+  }
+  if(is.null(top_ranges)){
+    #print("inf")
+    top_ranges<-10
+  }
+  top_range<-c(top_range,top_ranges[1])
+  #print(top_range)
+
+  #the bottom half
+  bottom_start<-which(p45.ldiffs[,1]<=lowR45[j-1])
+  bottom_start<-bottom_start[length(bottom_start)]
+  bottom_start
+  bottom_ranges<-c()
+  for(i in 1:bottom_start){
+    if(p45.ldiffs[i,j]<=0 & p45.ldiffs[i+1,j]>=0){
+     #print ("intercept")
+      bottom_ranges<-c(bottom_ranges,p45.ldiffs[i,1])
+    }
+  }
+  bottom_range<-c(bottom_range, bottom_ranges[length(bottom_ranges)])
+  #print(bottom_range)
+}
+length(bottom_range)
+length(lowR45)
+length(top_range)
+
+lowR45_withrange<-cbind(bottom_range,lowR45,top_range)
+lowR45_withrange
+#row 5 may not be good 
+```
+
+### Area under/between the curve
+
+```{r}
+p47.ldiffsc<-p47.ldiffs
+p47.ldiffsc[p47.ldiffsc<0]<-0
+
+p47.tp1AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,2],2))
+p47.tp2AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,3],2))
+p47.tp3AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,4],2))
+p47.tp4AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,5],2))
+p47.tp5AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,6],2))
+p47.tp6AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,7],2))
+p47.tp7AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,8],2))
+p47.tp8AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,9],2))
+p47.tp9AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,10],2))
+p47.tp10AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,11],2))
+p47.tp11AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,12],2))
+p47.tp12AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,13],2))
+p47.tp13AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,14],2))
+p47.tp14AUC <- sum(diff(p47.ldiffsc[,1])*rollmean(p47.ldiffsc[,15],2))
+
+p47.AUC<-rbind(p47.tp1AUC,p47.tp2AUC,p47.tp3AUC,p47.tp4AUC,p47.tp5AUC,p47.tp6AUC,p47.tp7AUC,p47.tp8AUC,p47.tp9AUC,p47.tp10AUC,p47.tp11AUC,p47.tp12AUC,p47.tp13AUC,p47.tp14AUC)
+p47.AUC
+
+```
+
+```{r}
+p45.ldiffsc<-p45.ldiffs
+p45.ldiffsc[p45.ldiffsc<0]<-0
+
+p45.tp1AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,2],2))
+p45.tp2AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,3],2))
+p45.tp3AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,4],2))
+p45.tp4AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,5],2))
+p45.tp5AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,6],2))
+p45.tp6AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,7],2))
+p45.tp7AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,8],2))
+p45.tp8AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,9],2))
+p45.tp9AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,10],2))
+p45.tp10AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,11],2))
+p45.tp11AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,12],2))
+p45.tp12AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,13],2))
+p45.tp13AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,14],2))
+p45.tp14AUC <- sum(diff(p45.ldiffsc[,1])*rollmean(p45.ldiffsc[,15],2))
+
+p45.AUC<-rbind(p45.tp1AUC,p45.tp2AUC,p45.tp3AUC,p45.tp4AUC,p45.tp5AUC,p45.tp6AUC,p45.tp7AUC,p45.tp8AUC,p45.tp9AUC,p45.tp10AUC,p45.tp11AUC,p45.tp12AUC,p45.tp13AUC,p45.tp14AUC)
+
+p45.AUC
+```
+
+
+```{r}
+dates<-c("03-04-19","03-21-19","04-11-19","05-02-19","05-16-19","05-28-19","06-13-19","07-01-19","07-22-19","08-16-19","09-17-19","10-14-19","11-12-19","12-06-19")
+auc.df<-data.frame(cbind(dates,p45.AUC[,1],p47.AUC[,1]))
+
+colnames(auc.df)<-c("dates","p45auc","p47auc")
+rownames(auc.df)<-c()
+Rk.results<-cbind(auc.df,upR45_withrange,lowR45_withrange,R47_withrange)
+Rk.results
+```
+
+## Making Figure 7
+
+Uses saved data files
+ripK_withcomments.csv for quadrat 47, I added columns for incidence
+and ripK_longR45.csv for quadrat 45, where I moved from a wide to a long format for quadrat 45 because it was easier to graph and then removed some values (NA) because at some time points there weren't really 2 peak clustering radii
+
+### Start with Quadrat 47
+```{r}
+ripK<-read.csv("ripK_withcomments.csv")
+
+ripK$dates<-as.Date(ripK$dates,"%m/%d/%y")
+ripK
+```
+```{r}
+ripK$scaledI<-ripK$p47.incidence/10
+ripK$p47.incidence
+ripK$p45.incidence
+topdifs<-ripK$top_R47-ripK$R47
+bottomdifs<-ripK$R47-ripK$bottom_R47
+
+ripK_p47<-ggplot(ripK)+
+  geom_point(mapping=aes(x=dates,y=R47,color=p47.auc))+
+  geom_path(mapping=aes(x=dates,y=R47),color="grey")+
+  geom_errorbar(aes(x=dates,ymin=R47-bottomdifs, ymax=R47+topdifs,color=p47.auc),width=3)+
+  scale_color_viridis(option = "magma",direction=-1,limits = c(0, 17))+
+  geom_bar(mapping=aes(x=dates,y=scaledI),stat="identity",fill=" dark grey")+
+  scale_y_continuous(name = "Cluster radius (m)", breaks=seq(0,10,1),expand = c(0, 0),limits=c(0,10),sec.axis = sec_axis(~.*10,name ="Disease incidence",breaks=c(0,4,8,12,16,20)))+
+  theme(legend.position = "none")+
+  theme(panel.background = element_blank())+ 
+  theme(text = element_text(family = "Times New Roman"),axis.text.x = element_text(angle = 70, hjust = 1))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(x="Survey Dates",color="ABC")+
+  scale_x_date( breaks=ripK$dates,date_labels="%d %b %y")+
+  guides(size = FALSE)
+ripK_p47
+```
+
+### Now Quadrat 45
+```{r}
+longripK_45<-read.csv("ripK_longR45.csv")
+longripK_45$dates<-as.Date(longripK_45$dates,"%m/%d/%y")
+longripK_45
+longripK_45$scaledI<-longripK_45$p45.incidence/10
+longripK_45$p45.incidence
+ripK_p45<-ggplot(longripK_45)+
+  #geom_line(data = longripK_45[!is.na(longripK_45$maxclust), ],aes(x=dates,y=maxclust,group=measure),color="grey")+
+  geom_point(mapping=aes(x=dates,y=maxclust,color=p45.auc,group=measure,shape=measure))+
+  geom_bar(mapping=aes(x=dates,y=scaledI),stat="identity",fill="dark grey")+
+  geom_point(mapping=aes(x=dates,y=maxclust,color=p45.auc,group=measure,shape=measure))+
+  geom_path(mapping=aes(x=dates,y=maxclust,group=measure),color="grey")+
+  geom_errorbar(aes(x=dates,ymin=maxclust-(maxclust-bottom_R45), ymax=maxclust+(top_R45-maxclust),color=p45.auc),width=3)+
+  scale_color_viridis(option = "magma",direction=-1,limits = c(0, 17))+
+  scale_y_continuous(name = "Cluster radius (m)", breaks=seq(0,10,1),expand = c(0, 0),limits=c(0,10),sec.axis = sec_axis(~.*10,name ="Disease incidence",breaks=c(0,4,8,12,16,20)))+
+  theme(legend.position = "bottom")+
+  theme(panel.background = element_blank())+ 
+  theme(text = element_text(family = "Times New Roman"),axis.text.x = element_text(angle = 70, hjust = 1))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(x="Survey Dates",color="ABC",shape="Quadrat 45 R")+
+  scale_x_date( breaks=ripK$dates,date_labels="%d %b %y")+
+  guides(size = FALSE)
+ripK_p45
+```
+
+
+```{r,fig.height=3.5,fig.width=3}
+ripK_p47/ripK_p45 +plot_annotation(tag_levels="a")
+
+```
+
+```{r}
+#tiff("Figure7.tiff",width=180, height=220,units="mm",res=300)
+ripK_p47/ripK_p45 +plot_annotation(tag_levels="A")
+#dev.off()
+```
+
