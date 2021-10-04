@@ -9,10 +9,10 @@ output: html_notebook
     - kruskal-wallis and barplot for differences among sites
     - species differences, kruskal-wallis test
 - Temperature correlations: Pearson cor tests (extended_envdisFig3.csv)
-- Bleaching and SCTLD: Chi-square tests (SCTLD_END_exta_ts.csv)
-- Are certain species more likely to show signs of SCTLD: fishers (SCTLD_END_exta.csv)
-- Size and SCTLD: wilcox test for just 11 susceptible species (SCTLD_END_exta.csv) and then multiple comparisons wiht correction for within species
-- Time of disease onset: bar graphs (SCTLD_END_exta.csv,timedif_surveys.csv)
+- Bleaching and SCTLD: Chi-square tests (SCTLD_END_Vpub_ts.csv)
+- Are certain species more likely to show signs of SCTLD: fishers (SCTLD_END_Vpub.csv)
+- Size and SCTLD: wilcox test for just 11 susceptible species (SCTLD_END_Vpub.csv) and then multiple comparisons wiht correction for within species
+- Time of disease onset: bar graphs (SCTLD_END_Vpub.csv,timedif_surveys.csv)
 - Reef indices of susceptibility
     - linear regressions for prevalence & density, initial coral cover, shannon diversity,and size
     - PCoA for species at each quadrat in relation to prevalence
@@ -68,7 +68,8 @@ my.se.cols<-function(x,a){
 
 #### Load in data
 ```{r}
-my.data<-read.csv("SCTLD_END_exta.csv") 
+my.data<-read.csv("SCTLD_END_Vpub.csv") 
+colnames(my.data)[1]<-"Site"
 nrow(my.data)
 
 # make a column with factors for if the coral got disease or not throughout the entire survey
@@ -89,6 +90,8 @@ head(site3)
 ## Are there significant differences in coral cover among sites and through time?
 ```{r}
 coverlong<-read.csv("cover_long.csv")
+colnames(coverlong)[1]<-"Site"
+
 coverlong$Site<-as.factor(coverlong$Site)
 coverlong$plotnum<-as.factor(coverlong$plotnum)
 coverlong$timept<-as.factor(coverlong$timept)
@@ -112,6 +115,7 @@ testInteractions(artlm(mod,"Site:timept"),pairwise=c("Site","timept"))
 ## Are there significant differences in percent coral tissue loss per week among the three sites?
 ```{r}
 my.df<-read.csv("SWG_SCTLDprogrates.csv")
+
 kruskal.test(Avg_prweek~Site,data=my.df)
 
 my.df$Site<-as.factor(my.df$Site)
@@ -234,7 +238,8 @@ mtext(side = 3, 'SST      DHW',at=86,line=1)
 ## Did susceptible corals who bleached then get sctld?
 ```{r}
 ###looking at thermal stress
-my.data.ts<-read.csv("SCTLD_END_exta_ts.csv") ## this file is the same as the original, but includes columns related to thermal stress signs
+my.data.ts<-read.csv("SCTLD_END_Vpub_ts.csv") ## this file is the same as the original, but includes columns related to thermal stress signs
+colnames(my.data.ts)[1]<-"Site"
 dis.sps.ts<-my.data.ts%>%
   filter(Sps!="AAGA",Sps!="ACER",Sps!="ATEN",Sps!="EFAS",Sps!="MANG",Sps!="MMEA",Sps!="MYCE",Sps!="OCUL",Sps!="ODIF",Sps!="PAST",Sps!="PDIV",Sps!="PPOR",Sps!="SRAD")%>%
   droplevels()
@@ -372,7 +377,7 @@ my.data.disonly<-my.data.dis%>%
 timedifs
 ```
 
-need the new_inf_corals function 
+need the new_inf_corals function that returnts the number of newly infected corals
 ```{r}
 new_inf_corals<-function(df,steps,x){
   ## newly_I
@@ -781,8 +786,8 @@ size.sp.plot<-ggplot(size.sp,aes(x=sps,y=mean,fill=state))+
 size.sp.plot
 ```
 
-```{r,fig.height=4.5,fig.width=2.5}
-tiff("Figure4.tiff",width=85, height=260,units="mm",res=300)
+```{r, fig.height=12,fig.width=10}
+#tiff("Figure4.tiff",width=85, height=260,units="mm",res=300)
 (prevplot/progrates/inftime/size.sp.plot)+ plot_annotation(tag_levels="A")
-dev.off()
+#dev.off()
 ```

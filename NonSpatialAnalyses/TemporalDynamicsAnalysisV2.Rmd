@@ -3,7 +3,7 @@ title: "Temporal Dynamics SCTLD Lower Keys"
 output: html_notebook
 ---
 ## This notebook includes:
-- Data-wrangling for temporal dynamics visualization, use SCTLD_END_exta.csv
+- Data-wrangling for temporal dynamics visualization, use SCTLD_END_Vpub.csv
 - Produces Figure 2
 
 ### Load packages needed and do initial data wrangling
@@ -21,7 +21,8 @@ getwd()
 ```
 
 ```{r}
-my.data<-read.csv("SCTLD_END_exta.csv", header=T) #shortened file with just one column per date with levels of 
+my.data<-read.csv("SCTLD_END_Vpub.csv", header=T) #shortened file with just one column per date with 
+colnames(my.data)[1]<-"Site"
 my.data<-my.data[,-c(34:37)]
 str(my.data)
 #my.data$Plot
@@ -616,7 +617,7 @@ s3.ts
 
 
 
-```{r,fig.height=4,fig.width=4}
+```{r,fig.height=10,fig.width=8}
 #tiff("Figure2.tiff",width=180, height=300,units="mm",res=300)
 (s2.ts/s1.ts/s3.ts) + plot_annotation(tag_levels="A")
 #dev.off()
